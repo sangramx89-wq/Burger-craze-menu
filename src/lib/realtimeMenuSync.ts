@@ -7,7 +7,7 @@ import {
   StorefrontTheme,
 } from '../types/index.ts';
 import { MenuPopup } from '../types/popup.ts';
-import { getSupabaseClient, hydrateSupabaseConfig, isSupabaseConfigured } from './supabaseClient.ts';
+import { getSupabaseClient, isSupabaseConfigured } from './supabaseClient.ts';
 import { formatSupabaseErrorHint } from './supabaseDiagnostics.ts';
 
 export const SYNC_REVISION_STORAGE_KEY = 'the_burger_craze_sync_revision';
@@ -105,8 +105,7 @@ function getBroadcastChannel(): BroadcastChannel | null {
  * Fetches the authoritative storefront snapshot from Supabase (if configured).
  */
 export async function fetchRemoteStorefrontState(): Promise<StorefrontSyncEnvelope | null> {
-  const configured = isSupabaseConfigured() || (await hydrateSupabaseConfig());
-  if (!configured) return null;
+  if (!isSupabaseConfigured()) return null;
   const client = await getSupabaseClient();
   if (!client) return null;
 
@@ -157,16 +156,20 @@ export async function publishStorefrontState(
   }
 
   // 2. Supabase Realtime broadcast + persistent upsert
-  const configured = isSupabaseConfigured() || (await hydrateSupabaseConfig());
-  const client = configured ? await getSupabaseClient() : null;
+  const client = isSupabaseConfigured() ? await getSupabaseClient() : null;
   if (client) {
     if (activeSupabaseChannel) {
       try {
-        await activeSupabaseChannel.send({
-          type: 'broadcast',
+        const msg = {
+          type: 'broadcast' as const,
           event: 'state_patch',
           payload: envelope,
-        });
+        };
+        if (activeSupabaseChannel.state === 'joined') {
+          await activeSupabaseChannel.send(msg);
+        } else if (typeof activeSupabaseChannel.httpSend === 'function') {
+          await activeSupabaseChannel.httpSend('state_patch', envelope);
+        }
       } catch {
         // Ignore transient broadcast error; DB upsert still delivers via postgres_changes
       }
@@ -219,11 +222,16 @@ export async function publishPopupsChangedSignal(): Promise<void> {
 
   if (activeSupabaseChannel) {
     try {
-      await activeSupabaseChannel.send({
-        type: 'broadcast',
+      const msg = {
+        type: 'broadcast' as const,
         event: 'popups_changed',
         payload: signal,
-      });
+      };
+      if (activeSupabaseChannel.state === 'joined') {
+        await activeSupabaseChannel.send(msg);
+      } else if (typeof activeSupabaseChannel.httpSend === 'function') {
+        await activeSupabaseChannel.httpSend('popups_changed', signal);
+      }
     } catch {
       // Ignore
     }
@@ -268,14 +276,8 @@ export function subscribeRealtimeSync({
   let activeClient: SupabaseClient | null = null;
   let disposed = false;
 
-  onStatusChange?.('connecting');
-
-  void hydrateSupabaseConfig().then((configured) => {
-    if (disposed) return;
-    if (!configured) {
-      onStatusChange?.('local');
-      return;
-    }
+  if (isSupabaseConfigured()) {
+    onStatusChange?.('connecting');
 
     void getSupabaseClient().then((client) => {
       if (disposed || !client) {
@@ -347,7 +349,9 @@ export function subscribeRealtimeSync({
 
       activeSupabaseChannel = channel;
     });
-  });
+  } else {
+    onStatusChange?.('local');
+  }
 
   return () => {
     disposed = true;
