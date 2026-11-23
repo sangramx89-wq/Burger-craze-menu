@@ -12,10 +12,8 @@ import {
   UploadCloud,
   DownloadCloud,
   KeyRound,
-  ShieldCheck,
 } from 'lucide-react';
 import { RealtimeSyncStatus } from '../lib/realtimeMenuSync.ts';
-import { hydrateSupabaseConfig } from '../lib/supabaseClient.ts';
 import {
   SUPABASE_SETUP_SQL,
   SupabaseDiagnosticsReport,
@@ -51,7 +49,6 @@ export const LiveSyncAdmin: React.FC<LiveSyncAdminProps> = ({
   const runChecks = useCallback(async () => {
     setIsChecking(true);
     try {
-      await hydrateSupabaseConfig();
       const next = await runSupabaseDiagnostics();
       setReport(next);
     } finally {
@@ -125,8 +122,7 @@ export const LiveSyncAdmin: React.FC<LiveSyncAdminProps> = ({
     report?.configured &&
       report.storefrontTable.ok &&
       report.popupsTable.ok &&
-      report.storageBucket.ok &&
-      report.staffAuth.authorized
+      report.storageBucket.ok
   );
 
   return (
@@ -172,15 +168,14 @@ export const LiveSyncAdmin: React.FC<LiveSyncAdminProps> = ({
             </h2>
             <p className="text-xs text-[#5C4533] leading-relaxed">
               {!report?.configured
-                ? 'Edits currently save in this browser only. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment Secrets, run the SQL script below, and create your staff user in Supabase Auth.'
+                ? 'Edits currently save in this browser only. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment variables, run the SQL script below, and redeploy or restart so customer phones sync live.'
                 : allBackendChecksReady && !lastSyncError
-                ? 'Any dish, availability, branding, or pop-up change made here persists in Postgres and pushes live to all connected customer phones. Customer phones are strictly read-only.'
+                ? 'Any dish, availability, branding, or pop-up change made here persists in Postgres and pushes live to all connected customer phones.'
                 : lastSyncError ||
                   report?.storefrontTable.error ||
                   report?.popupsTable.error ||
                   report?.storageBucket.error ||
-                  report?.staffAuth.error ||
-                  'Run the SQL Setup Script in Supabase SQL Editor and sign in with an authorized staff account.'}
+                  'Run the SQL Setup Script in your Supabase SQL Editor to finish configuring tables, Realtime, and storage.'}
             </p>
             {lastSyncedAt && (
               <p className="text-[11px] font-medium text-emerald-800 tabular-nums">
@@ -245,8 +240,8 @@ export const LiveSyncAdmin: React.FC<LiveSyncAdminProps> = ({
         </div>
       )}
 
-      {/* 5 Live Diagnostics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      {/* 4 Live Diagnostics Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-white rounded-2xl p-3.5 border border-[#EDE2D2] space-y-1.5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-[#8C7662] flex items-center gap-1.5">
@@ -264,40 +259,7 @@ export const LiveSyncAdmin: React.FC<LiveSyncAdminProps> = ({
           <p className="text-[11px] text-[#6B5746]">
             {report?.configured
               ? 'VITE_SUPABASE_URL & anon key loaded.'
-              : 'Set VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY in environment Secrets.'}
-          </p>
-        </div>
-
-        <div className="bg-white rounded-2xl p-3.5 border border-[#EDE2D2] space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#8C7662] flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-[#D4621A]" />
-              <span>Staff Auth</span>
-            </span>
-            <span
-              className={`text-[11px] font-bold ${
-                !report?.configured
-                  ? 'text-[#8C7662]'
-                  : report.staffAuth.authorized
-                  ? 'text-emerald-700'
-                  : 'text-rose-700'
-              }`}
-            >
-              {!report?.configured
-                ? 'Pending'
-                : report.staffAuth.authorized
-                ? 'Verified'
-                : report.staffAuth.signedIn
-                ? 'Blocked'
-                : 'Required'}
-            </span>
-          </div>
-          <p className="text-[11px] text-[#6B5746]">
-            {!report?.configured
-              ? 'Awaiting Supabase configuration.'
-              : report.staffAuth.authorized
-              ? `Signed in as ${report.staffAuth.role} (${report.staffAuth.email}).`
-              : report.staffAuth.error || 'Sign in with a verified staff account for cloud writes.'}
+              : 'Set VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY in environment settings.'}
           </p>
         </div>
 
@@ -396,42 +358,40 @@ export const LiveSyncAdmin: React.FC<LiveSyncAdminProps> = ({
       {/* Step-by-Step Guide After Connecting Supabase */}
       <div className="bg-white rounded-2xl p-4 sm:p-5 border border-[#EDE2D2] space-y-3">
         <h3 className="font-serif text-base font-bold text-[#2C1C12]">
-          How To Connect &amp; Lock Down Supabase
+          What To Do After Connecting Supabase
         </h3>
         <ol className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-[#5C4533]">
           <li className="p-3 rounded-xl bg-[#FAF7F0] border border-[#EFE5D6] space-y-1">
             <span className="font-bold text-[#2C1C12] block">
-              1. Add Env Secrets (Never in Code)
+              1. Copy Project URL &amp; Anon Public Key
             </span>
             <span>
-              Add <code className="font-mono text-[#B45309]">VITE_SUPABASE_URL</code> and{' '}
-              <code className="font-mono text-[#B45309]">VITE_SUPABASE_ANON_KEY</code> inside{' '}
-              <strong>Settings → Secrets</strong> (or Vercel Environment Variables).
+              In Supabase Dashboard open <strong>Project Settings → Data API / API Keys</strong> and copy your Project URL and publishable/anon key.
             </span>
           </li>
           <li className="p-3 rounded-xl bg-[#FAF7F0] border border-[#EFE5D6] space-y-1">
             <span className="font-bold text-[#2C1C12] block">
-              2. Run the Hardened SQL Script
+              2. Add Environment Variables &amp; Redeploy
             </span>
             <span>
-              In Supabase <strong>SQL Editor → New query</strong>, run the script below. It locks customer phones to read-only <code className="font-mono text-[#B45309]">SELECT</code> and enforces <code className="font-mono text-[#B45309]">authorized_staff</code> RLS on all writes.
+              Save <code className="font-mono text-[#B45309]">VITE_SUPABASE_URL</code> and{' '}
+              <code className="font-mono text-[#B45309]">VITE_SUPABASE_ANON_KEY</code> in your hosting/app environment settings, then restart or redeploy so the client bundle loads them.
             </span>
           </li>
           <li className="p-3 rounded-xl bg-[#FAF7F0] border border-[#EFE5D6] space-y-1">
             <span className="font-bold text-[#2C1C12] block">
-              3. Create Your Staff User in Supabase Auth
+              3. Run the SQL Setup Query Once
             </span>
             <span>
-              Open <strong>Authentication → Users → Add user</strong> in Supabase, enter your staff email (<code className="font-mono text-[#B45309]">sangramx89@gmail.com</code>) &amp; password, and check <strong>Auto Confirm User</strong>.
+              Open <strong>SQL Editor → New query</strong> in Supabase, paste the SQL script below, and click <strong>Run</strong>. It creates tables, RLS policies, Realtime replication, and the media storage bucket in one step.
             </span>
           </li>
           <li className="p-3 rounded-xl bg-[#FAF7F0] border border-[#EFE5D6] space-y-1">
             <span className="font-bold text-[#2C1C12] block">
-              4. Sign In &amp; Push Menu to Cloud
+              4. Push Initial Menu &amp; Test Live Phone Sync
             </span>
             <span>
-              Sign in to Admin Portal with your Supabase Auth credentials and tap{' '}
-              <strong>Push Menu to Cloud</strong> above. Customer phones will sync live within a second.
+              Tap <strong>Push Menu to Cloud</strong> above once, open the Customer menu on a phone, then toggle any dish Sold Out here — it updates on the customer phone within a second.
             </span>
           </li>
         </ol>

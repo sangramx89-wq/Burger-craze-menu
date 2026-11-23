@@ -160,16 +160,11 @@ export async function publishStorefrontState(
   if (client) {
     if (activeSupabaseChannel) {
       try {
-        const msg = {
-          type: 'broadcast' as const,
+        await activeSupabaseChannel.send({
+          type: 'broadcast',
           event: 'state_patch',
           payload: envelope,
-        };
-        if (activeSupabaseChannel.state === 'joined') {
-          await activeSupabaseChannel.send(msg);
-        } else if (typeof activeSupabaseChannel.httpSend === 'function') {
-          await activeSupabaseChannel.httpSend('state_patch', envelope);
-        }
+        });
       } catch {
         // Ignore transient broadcast error; DB upsert still delivers via postgres_changes
       }
@@ -222,16 +217,11 @@ export async function publishPopupsChangedSignal(): Promise<void> {
 
   if (activeSupabaseChannel) {
     try {
-      const msg = {
-        type: 'broadcast' as const,
+      await activeSupabaseChannel.send({
+        type: 'broadcast',
         event: 'popups_changed',
         payload: signal,
-      };
-      if (activeSupabaseChannel.state === 'joined') {
-        await activeSupabaseChannel.send(msg);
-      } else if (typeof activeSupabaseChannel.httpSend === 'function') {
-        await activeSupabaseChannel.httpSend('popups_changed', signal);
-      }
+      });
     } catch {
       // Ignore
     }

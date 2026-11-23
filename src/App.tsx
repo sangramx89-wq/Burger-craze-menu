@@ -40,8 +40,8 @@ import {
   DEFAULT_CAFE_INFO,
   getCategoryMeta,
   normalizeBundledAssetPath,
-} from './lib/menuDefaults.ts';
-import { DEFAULT_CUSTOM_ICON_ID, renderCategoryLogo } from './lib/categoryIcons.tsx';
+} from './data/menuData.ts';
+import { DEFAULT_CUSTOM_ICON_ID, renderCategoryLogo } from './data/categoryIcons.tsx';
 import { Category, FoodItem, PortionSizeKey, CafeInfo, PortalTarget, ServiceControlState, StorefrontTheme, SavedDefaultMenuSnapshot } from './types/index.ts';
 import { applyBulkAvailability, resolveItemAvailability } from './lib/availability.ts';
 import { MenuPopup } from './types/popup.ts';
@@ -62,7 +62,7 @@ import {
   extractSnapshotMediaUrls,
   parseSavedDefaultMenuSnapshot,
 } from './lib/defaultMenuSnapshot.ts';
-import { hydrateSupabaseConfig, isSupabaseConfigured } from './lib/supabaseClient.ts';
+import { isSupabaseConfigured } from './lib/supabaseClient.ts';
 import { usePerformanceProfile } from './lib/performanceProfile.ts';
 import { detectPortalTarget, navigateToPortal } from './lib/portalRouting.ts';
 import {
@@ -1107,9 +1107,6 @@ export default function App() {
 
     const pullLatestRemote = async (notifyOnChange: boolean) => {
       try {
-        await hydrateSupabaseConfig();
-        if (!isMounted) return;
-
         const remoteEnv = await fetchRemoteStorefrontState();
         if (!isMounted) return;
 
@@ -1122,8 +1119,8 @@ export default function App() {
         } else if (remoteEnv && hasRemotePopups && remoteEnv.payload.popups) {
           setPopups(remoteEnv.payload.popups);
           setLocalPopups(remoteEnv.payload.popups);
-        } else if (!remoteEnv && portalTarget !== 'customer' && !isSupabaseConfigured()) {
-          // Seed local broadcast snapshot when offline/local mode
+        } else if (!remoteEnv && portalTarget !== 'customer') {
+          // Seed initial remote snapshot when an Admin opens a fresh database
           await publishStorefrontState(latestSnapshotRef.current);
         }
 
@@ -1330,19 +1327,17 @@ export default function App() {
           isServicePaused={serviceControl.isPaused}
         />
 
-        {/* Preview Pop-up Queue only when explicitly triggered from Admin Portal */}
-        {isTestQueueOpen && (
-          <PromotionalModalQueue
-            popups={popups}
-            isOpenOverride={true}
-            onCloseOverride={() => setIsTestQueueOpen(false)}
-            onTriggerCta={(ctaLink) => {
-              setIsTestQueueOpen(false);
-              handleTriggerPopupCta(ctaLink);
-              handleNavigatePortal('customer');
-            }}
-          />
-        )}
+        {/* Preview Pop-up Queue when triggered from Admin Portal */}
+        <PromotionalModalQueue
+          popups={popups}
+          isOpenOverride={isTestQueueOpen ? true : undefined}
+          onCloseOverride={isTestQueueOpen ? () => setIsTestQueueOpen(false) : undefined}
+          onTriggerCta={(ctaLink) => {
+            setIsTestQueueOpen(false);
+            handleTriggerPopupCta(ctaLink);
+            handleNavigatePortal('customer');
+          }}
+        />
       </Suspense>
     );
   }

@@ -3,17 +3,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 let clientPromise: Promise<SupabaseClient | null> | null = null;
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-const rawUrl = env?.VITE_SUPABASE_URL?.trim() || '';
-const rawAnonKey = env?.VITE_SUPABASE_ANON_KEY?.trim() || '';
-
-const isPlaceholderConfig =
-  !rawUrl ||
-  !rawAnonKey ||
-  rawUrl.includes('your-project.supabase.co') ||
-  rawAnonKey === 'your-anon-key';
-
-const supabaseUrl = isPlaceholderConfig ? '' : rawUrl;
-const supabaseAnonKey = isPlaceholderConfig ? '' : rawAnonKey;
+const supabaseUrl = env?.VITE_SUPABASE_URL;
+const supabaseAnonKey = env?.VITE_SUPABASE_ANON_KEY;
 
 export function isSupabaseConfigured(): boolean {
   return Boolean(supabaseUrl && supabaseAnonKey);

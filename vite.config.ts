@@ -1,40 +1,10 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import dotenv from 'dotenv';
-import fs from 'fs';
 import path from 'path';
 import {fileURLToPath} from 'url';
-import {defineConfig, loadEnv, type Plugin} from 'vite';
+import {defineConfig, type Plugin} from 'vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-function resolveSupabaseOverrides(mode: string): Record<string, string> {
-  const envFromVite = loadEnv(mode, __dirname, 'VITE_');
-  const parsedDotEnv: Record<string, string> = {};
-
-  for (const fileName of ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`]) {
-    const filePath = path.resolve(__dirname, fileName);
-    if (fs.existsSync(filePath)) {
-      Object.assign(parsedDotEnv, dotenv.parse(fs.readFileSync(filePath)));
-    }
-  }
-
-  const defineOverrides: Record<string, string> = {};
-  for (const key of ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'] as const) {
-    const current = (process.env[key] || envFromVite[key] || '').trim();
-    const isPlaceholder =
-      !current ||
-      current === 'your-anon-key' ||
-      current.includes('your-project.supabase.co');
-    const localVal = (parsedDotEnv[key] || '').trim();
-
-    if (isPlaceholder && localVal) {
-      defineOverrides[`import.meta.env.${key}`] = JSON.stringify(localVal);
-    }
-  }
-
-  return defineOverrides;
-}
 
 function emitCustomerShellManifest(): Plugin {
   return {
@@ -70,9 +40,8 @@ function emitCustomerShellManifest(): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(() => {
   return {
-    define: resolveSupabaseOverrides(mode),
     plugins: [react(), tailwindcss(), emitCustomerShellManifest()],
     resolve: {
       alias: {

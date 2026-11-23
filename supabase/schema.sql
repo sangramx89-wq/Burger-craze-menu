@@ -1,41 +1,18 @@
 -- ==============================================================================
--- The Burger Craze — Hardened Idempotent Supabase Backend Setup Script
+-- The Burger Craze — Complete Idempotent Supabase Backend Setup Script
 -- Paste and run this entire script once in:
 --   Supabase Dashboard -> SQL Editor -> New query -> Run
 --
--- Security Model:
---   • Customer phones (anon) have STRICTLY READ-ONLY access to menu & active banners.
---   • Only verified staff signed in via Supabase Auth (listed in authorized_staff)
---     can write/update/delete dishes, availability, pop-ups, branding, or media.
+-- Includes:
+--   1. storefront_state table (menus, categories, logos, availability, theme, info)
+--   2. menu_popups table (scheduled & priority announcement banners)
+--   3. Scoped Row Level Security (RLS) policies
+--   4. Realtime WebSocket publication (storefront_state + menu_popups)
+--   5. Public menu-media Storage bucket + folder-scoped policies
 -- ==============================================================================
 
 -- ------------------------------------------------------------------------------
--- 1. AUTHORIZED STAFF ALLOWLIST (Controls who can write to menu & media)
--- ------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.authorized_staff (
-  email TEXT PRIMARY KEY,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'superadmin')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-ALTER TABLE public.authorized_staff ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Staff can verify own authorization" ON public.authorized_staff;
-CREATE POLICY "Staff can verify own authorization"
-  ON public.authorized_staff
-  FOR SELECT
-  TO authenticated
-  USING (lower(email) = lower(coalesce(auth.jwt() ->> 'email', '')));
-
--- Seed owner accounts (manage additional staff emails directly in Supabase Table Editor)
-INSERT INTO public.authorized_staff (email, role)
-VALUES
-  ('sangramx89@gmail.com', 'admin'),
-  ('sangramroul100@gmail.com', 'superadmin')
-ON CONFLICT (email) DO UPDATE SET role = EXCLUDED.role;
-
--- ------------------------------------------------------------------------------
--- 2. STOREFRONT LIVE SNAPSHOT TABLE
+-- 1. STOREFRONT LIVE SNAPSHOT TABLE
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.storefront_state (
   id TEXT PRIMARY KEY DEFAULT 'default',
@@ -55,54 +32,19 @@ CREATE POLICY "Public can read storefront state"
   USING (id = 'default');
 
 DROP POLICY IF EXISTS "Admin portal can upsert storefront state" ON public.storefront_state;
-DROP POLICY IF EXISTS "Authorized staff can insert storefront state" ON public.storefront_state;
-CREATE POLICY "Authorized staff can insert storefront state"
+CREATE POLICY "Admin portal can upsert storefront state"
   ON public.storefront_state
-  FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    id = 'default'
-    AND EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
-  );
+  FOR ALL
+  TO anon, authenticated
+  USING (id = 'default')
+  WITH CHECK (id = 'default');
 
-DROP POLICY IF EXISTS "Authorized staff can update storefront state" ON public.storefront_state;
-CREATE POLICY "Authorized staff can update storefront state"
-  ON public.storefront_state
-  FOR UPDATE
-  TO authenticated
-  USING (
-    id = 'default'
-    AND EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
-  )
-  WITH CHECK (
-    id = 'default'
-    AND EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
-  );
-
-DROP POLICY IF EXISTS "Authorized staff can delete storefront state" ON public.storefront_state;
-CREATE POLICY "Authorized staff can delete storefront state"
-  ON public.storefront_state
-  FOR DELETE
-  TO authenticated
-  USING (
-    id = 'default'
-    AND EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
-  );
+-- Note: If you enable Supabase Auth login for staff accounts later, replace
+-- "TO anon, authenticated" on the write policy above with "TO authenticated"
+-- so only signed-in staff can publish menu changes.
 
 -- ------------------------------------------------------------------------------
--- 3. ANNOUNCEMENT & PROMOTIONAL POP-UPS TABLE
+-- 2. ANNOUNCEMENT & PROMOTIONAL POP-UPS TABLE
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.menu_popups (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -141,59 +83,12 @@ CREATE POLICY "Public can view active popups"
 
 DROP POLICY IF EXISTS "Staff can manage all popups" ON public.menu_popups;
 DROP POLICY IF EXISTS "Allow admin portal popup management" ON public.menu_popups;
-DROP POLICY IF EXISTS "Authorized staff can read all popups" ON public.menu_popups;
-CREATE POLICY "Authorized staff can read all popups"
+CREATE POLICY "Allow admin portal popup management"
   ON public.menu_popups
-  FOR SELECT
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
-  );
-
-DROP POLICY IF EXISTS "Authorized staff can insert popups" ON public.menu_popups;
-CREATE POLICY "Authorized staff can insert popups"
-  ON public.menu_popups
-  FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
-  );
-
-DROP POLICY IF EXISTS "Authorized staff can update popups" ON public.menu_popups;
-CREATE POLICY "Authorized staff can update popups"
-  ON public.menu_popups
-  FOR UPDATE
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
-  )
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
-  );
-
-DROP POLICY IF EXISTS "Authorized staff can delete popups" ON public.menu_popups;
-CREATE POLICY "Authorized staff can delete popups"
-  ON public.menu_popups
-  FOR DELETE
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
-  );
+  FOR ALL
+  TO anon, authenticated
+  USING (true)
+  WITH CHECK (true);
 
 -- Seed starter pop-up banners only when menu_popups is completely empty
 INSERT INTO public.menu_popups (
@@ -257,7 +152,7 @@ SELECT * FROM (
 WHERE NOT EXISTS (SELECT 1 FROM public.menu_popups LIMIT 1);
 
 -- ------------------------------------------------------------------------------
--- 4. REALTIME REPLICATION & PUBLICATION
+-- 3. REALTIME REPLICATION & PUBLICATION
 -- ------------------------------------------------------------------------------
 ALTER TABLE public.storefront_state REPLICA IDENTITY FULL;
 ALTER TABLE public.menu_popups REPLICA IDENTITY FULL;
@@ -280,7 +175,7 @@ BEGIN
 END $$;
 
 -- ------------------------------------------------------------------------------
--- 5. PUBLIC READ / STAFF-ONLY WRITE MEDIA STORAGE BUCKET
+-- 4. PUBLIC MENU MEDIA STORAGE BUCKET & FOLDER-SCOPED POLICIES
 -- ------------------------------------------------------------------------------
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
@@ -306,48 +201,32 @@ DROP POLICY IF EXISTS "Admin upload menu-media" ON storage.objects;
 CREATE POLICY "Admin upload menu-media"
   ON storage.objects
   FOR INSERT
-  TO authenticated
+  TO anon, authenticated
   WITH CHECK (
     bucket_id = 'menu-media'
     AND (storage.foldername(name))[1] IN ('dishes', 'popups', 'logos')
-    AND EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
   );
 
 DROP POLICY IF EXISTS "Admin update menu-media" ON storage.objects;
 CREATE POLICY "Admin update menu-media"
   ON storage.objects
   FOR UPDATE
-  TO authenticated
+  TO anon, authenticated
   USING (
     bucket_id = 'menu-media'
     AND (storage.foldername(name))[1] IN ('dishes', 'popups', 'logos')
-    AND EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
   )
   WITH CHECK (
     bucket_id = 'menu-media'
     AND (storage.foldername(name))[1] IN ('dishes', 'popups', 'logos')
-    AND EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
   );
 
 DROP POLICY IF EXISTS "Admin delete menu-media" ON storage.objects;
 CREATE POLICY "Admin delete menu-media"
   ON storage.objects
   FOR DELETE
-  TO authenticated
+  TO anon, authenticated
   USING (
     bucket_id = 'menu-media'
     AND (storage.foldername(name))[1] IN ('dishes', 'popups', 'logos')
-    AND EXISTS (
-      SELECT 1 FROM public.authorized_staff s
-      WHERE lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    )
   );
