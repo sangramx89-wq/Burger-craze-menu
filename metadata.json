@@ -1,0 +1,6 @@
+{
+  "name": "Aura Café & Artisan Kitchen",
+  "description": "A premium café and restaurant ordering web application featuring artisanal dishes, seamless category browsing, interactive cart, customized orders, and live order tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
