@@ -2,7 +2,7 @@ import React from 'react';
 import { Clock, MapPin, Phone, PauseCircle } from 'lucide-react';
 import { BrandEmblem } from './BrandEmblem.tsx';
 import { CafeInfo, ServiceControlState } from '../types/index.ts';
-import { DEFAULT_CAFE_INFO } from '../data/menuData.ts';
+import { DEFAULT_CAFE_INFO } from '../lib/menuDefaults.ts';
 
 interface ServicePausedScreenProps {
   brandLogo?: string | null;

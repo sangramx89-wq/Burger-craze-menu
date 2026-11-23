@@ -40,8 +40,8 @@ import {
   DEFAULT_CAFE_INFO,
   getCategoryMeta,
   normalizeBundledAssetPath,
-} from './data/menuData.ts';
-import { DEFAULT_CUSTOM_ICON_ID, renderCategoryLogo } from './data/categoryIcons.tsx';
+} from './lib/menuDefaults.ts';
+import { DEFAULT_CUSTOM_ICON_ID, renderCategoryLogo } from './lib/categoryIcons.tsx';
 import { Category, FoodItem, PortionSizeKey, CafeInfo, PortalTarget, ServiceControlState, StorefrontTheme, SavedDefaultMenuSnapshot } from './types/index.ts';
 import { applyBulkAvailability, resolveItemAvailability } from './lib/availability.ts';
 import { MenuPopup } from './types/popup.ts';
