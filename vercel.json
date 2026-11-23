@@ -6,7 +6,7 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/((?!assets/|sw\\.js$|sw-manifest\\.json$).*)",
+      "source": "/((?!api/|assets/|sw\\.js$|sw-manifest\\.json$).*)",
       "destination": "/index.html"
     }
   ],

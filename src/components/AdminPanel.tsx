@@ -50,9 +50,12 @@ import {
 } from '../lib/serviceControl.ts';
 import {
   claimFirstRunPortalAccount,
+  completeSupabasePasswordRecovery,
   getPortalAuthStatus,
+  sendSupabasePasswordReset,
   signInToPortal,
   signOutFromPortal,
+  signUpSupabaseStaffAccount,
 } from '../lib/portalAuth.ts';
 import { RealtimeSyncStatus } from '../lib/realtimeMenuSync.ts';
 import {
@@ -170,6 +173,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
   const [authMode, setAuthMode] = useState<'supabase' | 'server'>('server');
   const [needsFirstRunSetup, setNeedsFirstRunSetup] = useState<boolean>(false);
+  const [serverUnavailable, setServerUnavailable] = useState<boolean>(false);
+  const [supabaseActionMode, setSupabaseActionMode] = useState<'signin' | 'signup' | 'recovery'>('signin');
   const [isAuthSubmitting, setIsAuthSubmitting] = useState<boolean>(false);
   const [rememberedEmail, setRememberedEmail] = useState<string>(() =>
     getRememberedPortalEmail('admin')
@@ -182,6 +187,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [authInfo, setAuthInfo] = useState('');
   const [adminTab, setAdminTab] = useState<
     'dishes' | 'categories' | 'popups' | 'branding' | 'qr' | 'sync'
   >('dishes');
@@ -194,6 +200,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         if (cancelled) return;
         setAuthMode(status.mode);
         setNeedsFirstRunSetup(status.needsFirstRunSetup);
+        setServerUnavailable(Boolean(status.serverUnavailable));
+        if (status.needsPasswordRecovery) {
+          setSupabaseActionMode('recovery');
+          if (status.email) setAdminEmail(status.email);
+        }
         setIsAuthenticated(Boolean(status.authenticated && !isAdminLocked));
       })
       .finally(() => {
@@ -262,6 +273,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   }>({});
 
   // Async Portal Authentication (Supabase Auth + authorized_staff OR Server Auth fallback)
+  const isPasswordCreateFlow =
+    (needsFirstRunSetup && authMode === 'server') ||
+    (authMode === 'supabase' && (supabaseActionMode === 'signup' || supabaseActionMode === 'recovery'));
+
   const handleVerifyLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isAdminLocked) {
@@ -270,8 +285,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
     if (isAuthSubmitting) return;
 
-    const isClaimMode = needsFirstRunSetup && authMode === 'server';
-    if (isClaimMode) {
+    if (isPasswordCreateFlow) {
       if (adminPassword.length < 8) {
         setAuthError('Password must be at least 8 characters.');
         return;
@@ -284,32 +298,76 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     setIsAuthSubmitting(true);
     setAuthError('');
+    setAuthInfo('');
     try {
-      const result = isClaimMode
-        ? await claimFirstRunPortalAccount({
-            role: 'admin',
-            email: adminEmail,
-            password: adminPassword,
-            rememberMe,
-          })
-        : await signInToPortal({
-            role: 'admin',
-            email: adminEmail,
-            password: adminPassword,
-            rememberMe,
-          });
+      let result;
+      if (authMode === 'supabase' && supabaseActionMode === 'recovery') {
+        result = await completeSupabasePasswordRecovery({
+          role: 'admin',
+          newPassword: adminPassword,
+          rememberMe,
+        });
+      } else if (authMode === 'supabase' && supabaseActionMode === 'signup') {
+        result = await signUpSupabaseStaffAccount({
+          role: 'admin',
+          email: adminEmail,
+          password: adminPassword,
+          rememberMe,
+        });
+      } else if (needsFirstRunSetup && authMode === 'server') {
+        result = await claimFirstRunPortalAccount({
+          role: 'admin',
+          email: adminEmail,
+          password: adminPassword,
+          rememberMe,
+        });
+      } else {
+        result = await signInToPortal({
+          role: 'admin',
+          email: adminEmail,
+          password: adminPassword,
+          rememberMe,
+        });
+      }
 
       if (result.ok) {
         const normalizedEmail = (result.email || adminEmail).trim();
         setRememberedEmail(rememberMe ? normalizedEmail : '');
         setNeedsFirstRunSetup(false);
+        setSupabaseActionMode('signin');
         setIsAuthenticated(true);
         setAuthError('');
+        setAuthInfo('');
         setAdminPassword('');
         setConfirmPassword('');
         setRememberMe(false);
+      } else if (result.pendingEmailConfirmation && result.info) {
+        setAuthInfo(result.info);
+        setSupabaseActionMode('signin');
+        setAdminPassword('');
+        setConfirmPassword('');
       } else {
         setAuthError(result.error || 'Authentication failed.');
+      }
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (isAuthSubmitting) return;
+    setIsAuthSubmitting(true);
+    setAuthError('');
+    setAuthInfo('');
+    try {
+      const result = await sendSupabasePasswordReset({
+        role: 'admin',
+        email: adminEmail,
+      });
+      if (result.ok && result.info) {
+        setAuthInfo(result.info);
+      } else {
+        setAuthError(result.error || 'Unable to send password reset email.');
       }
     } finally {
       setIsAuthSubmitting(false);
@@ -326,6 +384,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setConfirmPassword('');
     setRememberMe(false);
     setAuthError('');
+    setAuthInfo('');
   };
 
   const handleForgetSavedEmail = () => {
@@ -333,6 +392,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setRememberedEmail('');
     setAdminEmail('');
     setAuthError('');
+    setAuthInfo('');
   };
 
   // Dish image upload handler: stage draft in interactive framing modal before confirming
@@ -655,65 +715,143 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
 
             <form onSubmit={(e) => void handleVerifyLogin(e)} className="p-6 space-y-4 text-xs">
-              {authMode === 'supabase' && (
-                <div className="px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] font-medium">
-                  Secured by <strong>Supabase Auth</strong> &amp; <code className="font-mono">authorized_staff</code> allowlist.
+              {authMode === 'supabase' ? (
+                <div className="space-y-2.5">
+                  <div className="px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] font-medium">
+                    Secured by <strong>Supabase Auth</strong> &amp; <code className="font-mono">authorized_staff</code> allowlist.
+                  </div>
+                  {supabaseActionMode !== 'recovery' && (
+                    <div
+                      role="tablist"
+                      aria-label="Admin authentication mode"
+                      className="grid grid-cols-2 p-1 rounded-xl bg-[#FAF6EE] border border-[#E6DACB] gap-1"
+                    >
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={supabaseActionMode === 'signin'}
+                        onClick={() => {
+                          setSupabaseActionMode('signin');
+                          setAuthError('');
+                          setAuthInfo('');
+                        }}
+                        className={`py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                          supabaseActionMode === 'signin'
+                            ? 'bg-[#D4621A] text-white shadow-2xs'
+                            : 'text-[#6B5746] hover:text-[#2C1C12]'
+                        }`}
+                      >
+                        Sign In
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={supabaseActionMode === 'signup'}
+                        onClick={() => {
+                          setSupabaseActionMode('signup');
+                          setAuthError('');
+                          setAuthInfo('');
+                        }}
+                        className={`py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                          supabaseActionMode === 'signup'
+                            ? 'bg-[#D4621A] text-white shadow-2xs'
+                            : 'text-[#6B5746] hover:text-[#2C1C12]'
+                        }`}
+                      >
+                        First-Time Setup
+                      </button>
+                    </div>
+                  )}
+                  {supabaseActionMode === 'signup' && (
+                    <p className="text-[11px] text-[#6B5746] leading-relaxed">
+                      Creates your Supabase Auth login password. Only emails listed in{' '}
+                      <code className="font-mono font-semibold">authorized_staff</code> can unlock the portal.
+                    </p>
+                  )}
+                  {supabaseActionMode === 'recovery' && (
+                    <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-medium">
+                      Password reset verified. Choose a new password (min 8 characters) to finish signing in.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                serverUnavailable && (
+                  <div className="px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] leading-relaxed space-y-1">
+                    <p className="font-bold">Supabase Environment Variables Missing</p>
+                    <p>
+                      This static host has no backend auth API. Add{' '}
+                      <code className="font-mono font-semibold">VITE_SUPABASE_URL</code> and{' '}
+                      <code className="font-mono font-semibold">VITE_SUPABASE_ANON_KEY</code> in{' '}
+                      <strong>Vercel → Project Settings → Environment Variables</strong>, then redeploy.
+                    </p>
+                  </div>
+                )
+              )}
+
+              {supabaseActionMode !== 'recovery' && (
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <label htmlFor="admin-email-id" className="block font-bold text-[#5C4533]">
+                      Admin ID (Email)
+                    </label>
+                    {rememberedEmail && (
+                      <button
+                        type="button"
+                        onClick={handleForgetSavedEmail}
+                        className="text-[11px] font-semibold text-[#D4621A] hover:underline cursor-pointer"
+                      >
+                        Forget email
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    id="admin-email-id"
+                    type="email"
+                    required
+                    autoFocus={!rememberedEmail}
+                    autoComplete="username"
+                    placeholder="Enter admin email"
+                    value={adminEmail}
+                    onChange={(e) => {
+                      setAdminEmail(e.target.value);
+                      setAuthError('');
+                      setAuthInfo('');
+                    }}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[#E0D2C2] text-[#2C1C12] font-medium focus:outline-none focus:ring-2 focus:ring-[#D4621A]"
+                  />
                 </div>
               )}
 
               <div>
                 <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <label htmlFor="admin-email-id" className="block font-bold text-[#5C4533]">
-                    Admin ID (Email)
+                  <label htmlFor="admin-password" className="block font-bold text-[#5C4533]">
+                    {supabaseActionMode === 'recovery'
+                      ? 'New Password (min 8 characters)'
+                      : isPasswordCreateFlow
+                      ? 'Create Password (min 8 characters)'
+                      : 'Password'}
                   </label>
-                  {rememberedEmail && (
+                  {authMode === 'supabase' && supabaseActionMode === 'signin' && (
                     <button
                       type="button"
-                      onClick={handleForgetSavedEmail}
-                      className="text-[11px] font-semibold text-[#D4621A] hover:underline cursor-pointer"
+                      onClick={() => void handleForgotPassword()}
+                      disabled={isAuthSubmitting}
+                      className="text-[11px] font-semibold text-[#D4621A] hover:underline cursor-pointer disabled:opacity-50"
                     >
-                      Forget email
+                      Forgot password?
                     </button>
                   )}
                 </div>
-                <input
-                  id="admin-email-id"
-                  type="email"
-                  required
-                  autoFocus={!rememberedEmail}
-                  autoComplete="username"
-                  placeholder="Enter admin email"
-                  value={adminEmail}
-                  onChange={(e) => {
-                    setAdminEmail(e.target.value);
-                    setAuthError('');
-                  }}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[#E0D2C2] text-[#2C1C12] font-medium focus:outline-none focus:ring-2 focus:ring-[#D4621A]"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="admin-password" className="block font-bold text-[#5C4533] mb-1.5">
-                  {needsFirstRunSetup && authMode === 'server'
-                    ? 'Create Password (min 8 characters)'
-                    : 'Password'}
-                </label>
                 <div className="relative">
                   <input
                     id="admin-password"
                     type={showPassword ? 'text' : 'password'}
                     required
-                    minLength={needsFirstRunSetup && authMode === 'server' ? 8 : undefined}
-                    autoFocus={Boolean(rememberedEmail)}
-                    autoComplete={
-                      needsFirstRunSetup && authMode === 'server'
-                        ? 'new-password'
-                        : 'current-password'
-                    }
+                    minLength={isPasswordCreateFlow ? 8 : undefined}
+                    autoFocus={Boolean(rememberedEmail) || supabaseActionMode === 'recovery'}
+                    autoComplete={isPasswordCreateFlow ? 'new-password' : 'current-password'}
                     placeholder={
-                      needsFirstRunSetup && authMode === 'server'
-                        ? 'At least 8 characters'
-                        : 'Enter password'
+                      isPasswordCreateFlow ? 'At least 8 characters' : 'Enter password'
                     }
                     value={adminPassword}
                     onChange={(e) => {
@@ -733,7 +871,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {needsFirstRunSetup && authMode === 'server' && (
+              {isPasswordCreateFlow && (
                 <div>
                   <label
                     htmlFor="admin-confirm-password"
@@ -779,9 +917,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </span>
               </label>
 
+              {authInfo && (
+                <div className="flex items-start gap-2 text-emerald-800 bg-emerald-50 px-3 py-2.5 rounded-xl border border-emerald-200 font-medium leading-relaxed">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{authInfo}</span>
+                </div>
+              )}
+
               {authError && (
-                <div className="flex items-center gap-2 text-rose-700 bg-rose-50 px-3 py-2 rounded-xl border border-rose-200 font-medium">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
+                <div className="flex items-start gap-2 text-rose-700 bg-rose-50 px-3 py-2.5 rounded-xl border border-rose-200 font-medium leading-relaxed">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>{authError}</span>
                 </div>
               )}
@@ -795,6 +940,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <span>
                   {isAuthSubmitting
                     ? 'Verifying...'
+                    : authMode === 'supabase' && supabaseActionMode === 'recovery'
+                    ? 'Update Password & Sign In'
+                    : authMode === 'supabase' && supabaseActionMode === 'signup'
+                    ? 'Activate Staff Account'
                     : needsFirstRunSetup && authMode === 'server'
                     ? 'Create Admin Account & Sign In'
                     : 'Sign In to Admin Portal'}
