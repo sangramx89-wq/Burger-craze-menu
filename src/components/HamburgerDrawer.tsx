@@ -2,7 +2,7 @@ import React from 'react';
 import { AnimatePresence, m } from 'motion/react';
 import { X, MapPin, Phone, Clock, ChevronRight } from 'lucide-react';
 import { Category, CafeInfo, StorefrontTheme } from '../types/index.ts';
-import { DEFAULT_CATEGORIES, DEFAULT_CAFE_INFO } from '../data/menuData.ts';
+import { DEFAULT_CATEGORIES, DEFAULT_CAFE_INFO } from '../lib/menuDefaults.ts';
 import { BrandEmblem } from './BrandEmblem.tsx';
 
 interface HamburgerDrawerProps {

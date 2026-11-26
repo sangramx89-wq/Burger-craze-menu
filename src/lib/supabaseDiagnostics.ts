@@ -1,4 +1,9 @@
-import { getSupabaseClient, isSupabaseConfigured } from './supabaseClient.ts';
+import {
+  getLastSupabaseClientError,
+  getSupabaseClient,
+  getSupabaseConfigStatus,
+  SupabaseConfigStatus,
+} from './supabaseClient.ts';
 import { MEDIA_BUCKET_NAME } from './mediaStorage.ts';
 
 export interface TableCheckResult {
@@ -12,6 +17,7 @@ export interface TableCheckResult {
 
 export interface SupabaseDiagnosticsReport {
   configured: boolean;
+  configStatus: SupabaseConfigStatus;
   checkedAt: string;
   storefrontTable: TableCheckResult;
   popupsTable: TableCheckResult;
@@ -257,6 +263,12 @@ export function formatSupabaseErrorHint(rawMessage?: string | null): string {
   if (!msg) return 'Unknown connection error';
 
   const lower = msg.toLowerCase();
+  if (lower.includes('invalid api key') || lower.includes('jwt') || lower.includes('invalid signature')) {
+    return 'Invalid VITE_SUPABASE_ANON_KEY — verify your project anon/publishable key and redeploy.';
+  }
+  if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('load failed')) {
+    return 'Could not reach Supabase URL — verify VITE_SUPABASE_URL and network access.';
+  }
   if (lower.includes('does not exist') || lower.includes('could not find the table')) {
     return 'Table not created yet — run the SQL Setup Script in Supabase SQL Editor.';
   }
@@ -270,27 +282,35 @@ export function formatSupabaseErrorHint(rawMessage?: string | null): string {
 }
 
 export async function runSupabaseDiagnostics(): Promise<SupabaseDiagnosticsReport> {
-  const configured = isSupabaseConfigured();
+  const configStatus = getSupabaseConfigStatus();
   const checkedAt = new Date().toISOString();
 
-  if (!configured) {
+  if (!configStatus.configured) {
+    const reason = configStatus.errorMessage || 'Environment variables not configured.';
     return {
       configured: false,
+      configStatus,
       checkedAt,
-      storefrontTable: { ok: false, error: 'Environment variables not configured.' },
-      popupsTable: { ok: false, error: 'Environment variables not configured.' },
-      storageBucket: { ok: false, error: 'Environment variables not configured.' },
+      storefrontTable: { ok: false, error: reason },
+      popupsTable: { ok: false, error: reason },
+      storageBucket: { ok: false, error: reason },
     };
   }
 
   const client = await getSupabaseClient();
   if (!client) {
+    const initErr = getLastSupabaseClientError() || 'Failed to initialize Supabase client.';
     return {
       configured: false,
+      configStatus: {
+        ...configStatus,
+        configured: false,
+        errorMessage: initErr,
+      },
       checkedAt,
-      storefrontTable: { ok: false, error: 'Failed to initialize Supabase client.' },
-      popupsTable: { ok: false, error: 'Failed to initialize Supabase client.' },
-      storageBucket: { ok: false, error: 'Failed to initialize Supabase client.' },
+      storefrontTable: { ok: false, error: initErr },
+      popupsTable: { ok: false, error: initErr },
+      storageBucket: { ok: false, error: initErr },
     };
   }
 
@@ -328,6 +348,7 @@ export async function runSupabaseDiagnostics(): Promise<SupabaseDiagnosticsRepor
 
   return {
     configured: true,
+    configStatus,
     checkedAt,
     storefrontTable,
     popupsTable,

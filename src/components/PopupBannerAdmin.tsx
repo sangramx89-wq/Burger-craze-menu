@@ -19,7 +19,7 @@ import {
 import { MenuPopup } from '../types/popup.ts';
 import { ResetConfirmModal } from './ResetConfirmModal.tsx';
 import { ImageFramingModal } from './ImageFramingModal.tsx';
-import { DEFAULT_CATEGORIES } from '../data/menuData.ts';
+import { DEFAULT_CATEGORIES } from '../lib/menuDefaults.ts';
 import {
   PRESET_PROMO_BANNERS,
   formatTime12Hour,

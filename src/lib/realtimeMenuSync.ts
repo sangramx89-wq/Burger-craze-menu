@@ -56,8 +56,14 @@ let latestKnownRevision = (() => {
   }
 })();
 
+let lastAppliedRemoteRevision = -1;
+
 export function getLatestKnownRevision(): number {
   return latestKnownRevision;
+}
+
+export function getLastAppliedRemoteRevision(): number {
+  return lastAppliedRemoteRevision;
 }
 
 export function bumpRevision(incomingRevision?: number): number {
@@ -71,10 +77,29 @@ export function bumpRevision(incomingRevision?: number): number {
   return next;
 }
 
-export function recordIncomingRevision(revision: number): boolean {
-  if (!Number.isFinite(revision) || revision <= latestKnownRevision) {
+export function recordIncomingRevision(revision: number, allowAnyDifferentRevision = false): boolean {
+  if (!Number.isFinite(revision)) {
     return false;
   }
+  if (allowAnyDifferentRevision) {
+    if (revision === lastAppliedRemoteRevision) {
+      return false;
+    }
+    lastAppliedRemoteRevision = revision;
+    if (revision > latestKnownRevision) {
+      latestKnownRevision = revision;
+      try {
+        localStorage.setItem(SYNC_REVISION_STORAGE_KEY, String(revision));
+      } catch {
+        // Ignore storage errors
+      }
+    }
+    return true;
+  }
+  if (revision <= latestKnownRevision) {
+    return false;
+  }
+  lastAppliedRemoteRevision = revision;
   latestKnownRevision = revision;
   try {
     localStorage.setItem(SYNC_REVISION_STORAGE_KEY, String(revision));
@@ -232,6 +257,7 @@ interface SubscribeSyncHandlers {
   onStorefrontUpdate: (envelope: StorefrontSyncEnvelope) => void;
   onPopupsChanged: () => void;
   onStatusChange?: (status: RealtimeSyncStatus) => void;
+  allowAnyDifferentRevision?: boolean;
 }
 
 /**
@@ -242,6 +268,7 @@ export function subscribeRealtimeSync({
   onStorefrontUpdate,
   onPopupsChanged,
   onStatusChange,
+  allowAnyDifferentRevision = false,
 }: SubscribeSyncHandlers): () => void {
   const bc = getBroadcastChannel();
 
@@ -251,7 +278,7 @@ export function subscribeRealtimeSync({
     if (data.type === 'STATE_UPDATE' && data.envelope) {
       const env = data.envelope as StorefrontSyncEnvelope;
       if (env.updatedBy === SESSION_CLIENT_ID) return;
-      if (recordIncomingRevision(env.revision)) {
+      if (recordIncomingRevision(env.revision, allowAnyDifferentRevision)) {
         onStorefrontUpdate(env);
       }
     } else if (data.type === 'POPUPS_UPDATE') {
@@ -285,7 +312,7 @@ export function subscribeRealtimeSync({
         .on('broadcast', { event: 'state_patch' }, ({ payload }) => {
           const env = payload as StorefrontSyncEnvelope | undefined;
           if (!env || !env.payload || env.updatedBy === SESSION_CLIENT_ID) return;
-          if (recordIncomingRevision(env.revision)) {
+          if (recordIncomingRevision(env.revision, allowAnyDifferentRevision)) {
             onStorefrontUpdate(env);
           }
         })
@@ -309,7 +336,7 @@ export function subscribeRealtimeSync({
             if (!record?.payload) return;
             if (record.updated_by === SESSION_CLIENT_ID) return;
             const rev = Number(record.revision) || Date.now();
-            if (recordIncomingRevision(rev)) {
+            if (recordIncomingRevision(rev, allowAnyDifferentRevision)) {
               onStorefrontUpdate({
                 payload: record.payload,
                 revision: rev,

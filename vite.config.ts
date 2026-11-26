@@ -2,9 +2,20 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {fileURLToPath} from 'url';
-import {defineConfig, type Plugin} from 'vite';
+import {defineConfig, loadEnv, type Plugin} from 'vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function stripWrappingQuotes(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
 
 function emitCustomerShellManifest(): Plugin {
   return {
@@ -40,9 +51,32 @@ function emitCustomerShellManifest(): Plugin {
   };
 }
 
-export default defineConfig(() => {
+export default defineConfig(({mode}) => {
+  const env = loadEnv(mode, process.cwd(), '');
+
+  const resolvedSupabaseUrl = stripWrappingQuotes(
+    env.VITE_SUPABASE_URL ||
+      env.VITE_SUPABASE_PROJECT_URL ||
+      env.NEXT_PUBLIC_SUPABASE_URL ||
+      env.SUPABASE_URL ||
+      ''
+  );
+
+  const resolvedSupabaseAnonKey = stripWrappingQuotes(
+    env.VITE_SUPABASE_ANON_KEY ||
+      env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+      env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+      env.SUPABASE_ANON_KEY ||
+      ''
+  );
+
   return {
     plugins: [react(), tailwindcss(), emitCustomerShellManifest()],
+    define: {
+      __VITE_SUPABASE_URL__: JSON.stringify(resolvedSupabaseUrl),
+      __VITE_SUPABASE_ANON_KEY__: JSON.stringify(resolvedSupabaseAnonKey),
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

@@ -1,5 +1,5 @@
-const SHELL_CACHE = 'cafe-menu-shell-v1';
-const RUNTIME_CACHE = 'cafe-menu-runtime-v1';
+const SHELL_CACHE = 'cafe-menu-shell-v2';
+const RUNTIME_CACHE = 'cafe-menu-runtime-v2';
 
 const EXCLUDED_PATH_PREFIXES = ['/admin', '/superadmin', '/api/', '/@vite', '/src/', '/node_modules/'];
 

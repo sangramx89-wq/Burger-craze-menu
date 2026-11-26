@@ -12,7 +12,7 @@ import {
   Wifi,
 } from 'lucide-react';
 import { CafeInfo } from '../types/index.ts';
-import { DEFAULT_CAFE_INFO } from '../data/menuData.ts';
+import { DEFAULT_CAFE_INFO } from '../lib/menuDefaults.ts';
 import { BrandEmblem } from './BrandEmblem.tsx';
 import {
   getCustomerStorefrontUrl,

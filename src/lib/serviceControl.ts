@@ -157,16 +157,6 @@ export function clearRememberedPortalEmail(role: PortalAuthRole): void {
   }
 }
 
-export const ADMIN_CREDENTIALS = {
-  id: 'sangramx89@gmail.com',
-  password: 'burger_craze98',
-};
-
-export const SUPERADMIN_CREDENTIALS = {
-  id: 'sangramroul100@gmail.com',
-  password: 'Sangram@71',
-};
-
 export const DEFAULT_PAUSE_TITLE = 'Service Temporarily Paused';
 export const DEFAULT_PAUSE_MESSAGE =
   'The Burger Craze is currently undergoing scheduled maintenance. Please check back shortly or call us directly for assistance.';
@@ -180,20 +170,6 @@ export const DEFAULT_SERVICE_CONTROL: ServiceControlState = {
   updatedAt: null,
   actionLog: [],
 };
-
-export function validateAdminCredentials(idInput: string, passwordInput: string): boolean {
-  return (
-    idInput.trim().toLowerCase() === ADMIN_CREDENTIALS.id.toLowerCase() &&
-    passwordInput === ADMIN_CREDENTIALS.password
-  );
-}
-
-export function validateSuperAdminCredentials(idInput: string, passwordInput: string): boolean {
-  return (
-    idInput.trim().toLowerCase() === SUPERADMIN_CREDENTIALS.id.toLowerCase() &&
-    passwordInput === SUPERADMIN_CREDENTIALS.password
-  );
-}
 
 export function loadServiceControl(): ServiceControlState {
   try {

@@ -315,12 +315,18 @@ export async function togglePopupActive(popupId: string): Promise<MenuPopup[]> {
 
   const updatedItem = currentList.find((p) => p.id === popupId);
   const supabaseClient = await getSupabaseClient();
-  if (supabaseClient && updatedItem && UUID_REGEX.test(popupId)) {
+  if (supabaseClient && updatedItem) {
+    if (!UUID_REGEX.test(popupId)) {
+      return savePopup(updatedItem);
+    }
     try {
-      await supabaseClient
+      const { error } = await supabaseClient
         .from('menu_popups')
         .update({ is_active: updatedItem.is_active })
         .eq('id', popupId);
+      if (error) {
+        console.warn('Failed to update popup status in Supabase:', error.message);
+      }
     } catch (err) {
       console.warn('Failed to update status in Supabase, local cache updated:', err);
     }

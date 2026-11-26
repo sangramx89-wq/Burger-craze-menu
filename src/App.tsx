@@ -1104,6 +1104,8 @@ export default function App() {
   // Initial remote sync, Realtime subscription, and focus/reconnect refresh
   useEffect(() => {
     let isMounted = true;
+    const isCustomerPortal = portalTarget === 'customer';
+    let currentChannelStatus: RealtimeSyncStatus = 'local';
 
     const pullLatestRemote = async (notifyOnChange: boolean) => {
       try {
@@ -1114,14 +1116,26 @@ export default function App() {
           remoteEnv?.payload && Array.isArray(remoteEnv.payload.popups)
         );
 
-        if (remoteEnv && recordIncomingRevision(remoteEnv.revision)) {
+        if (remoteEnv && recordIncomingRevision(remoteEnv.revision, isCustomerPortal)) {
           applyRemoteEnvelope(remoteEnv, notifyOnChange);
+          if (isSupabaseConfigured()) {
+            setLastSyncError(null);
+            setLastSyncedAt(new Date().toISOString());
+          }
         } else if (remoteEnv && hasRemotePopups && remoteEnv.payload.popups) {
           setPopups(remoteEnv.payload.popups);
           setLocalPopups(remoteEnv.payload.popups);
-        } else if (!remoteEnv && portalTarget !== 'customer') {
+        } else if (!remoteEnv && !isCustomerPortal && isSupabaseConfigured()) {
           // Seed initial remote snapshot when an Admin opens a fresh database
-          await publishStorefrontState(latestSnapshotRef.current);
+          const seedRes = await publishStorefrontState(latestSnapshotRef.current);
+          if (isMounted) {
+            if (!seedRes.ok && seedRes.error) {
+              setLastSyncError(seedRes.error);
+            } else {
+              setLastSyncError(null);
+              setLastSyncedAt(new Date().toISOString());
+            }
+          }
         }
 
         if (!hasRemotePopups) {
@@ -1140,18 +1154,24 @@ export default function App() {
     void pullLatestRemote(false);
 
     const unsubscribe = subscribeRealtimeSync({
+      allowAnyDifferentRevision: isCustomerPortal,
       onStatusChange: (status) => {
+        currentChannelStatus = status;
         if (isMounted) setSyncStatus(status);
       },
       onStorefrontUpdate: (envelope) => {
         if (!isMounted) return;
         applyRemoteEnvelope(envelope, true);
+        if (isSupabaseConfigured()) {
+          setLastSyncError(null);
+          setLastSyncedAt(new Date().toISOString());
+        }
       },
       onPopupsChanged: () => {
         fetchAllPopups().then((data) => {
           if (isMounted && Array.isArray(data)) {
             setPopups(data);
-            if (portalTarget === 'customer') {
+            if (isCustomerPortal) {
               showMenuUpdatedNotice('Menu updated');
             }
           }
@@ -1165,14 +1185,31 @@ export default function App() {
       }
     };
 
+    // Fallback catch-up sync if a phone's WebSocket drops on restrictive café Wi-Fi
+    const fallbackPollId = isSupabaseConfigured()
+      ? window.setInterval(() => {
+          if (
+            document.visibilityState === 'visible' &&
+            (isCustomerPortal || currentChannelStatus !== 'live')
+          ) {
+            void pullLatestRemote(true);
+          }
+        }, 30000)
+      : null;
+
     document.addEventListener('visibilitychange', handleVisibilityOrOnline);
     window.addEventListener('online', handleVisibilityOrOnline);
+    window.addEventListener('focus', handleVisibilityOrOnline);
 
     return () => {
       isMounted = false;
       unsubscribe();
+      if (fallbackPollId !== null) {
+        window.clearInterval(fallbackPollId);
+      }
       document.removeEventListener('visibilitychange', handleVisibilityOrOnline);
       window.removeEventListener('online', handleVisibilityOrOnline);
+      window.removeEventListener('focus', handleVisibilityOrOnline);
       if (noticeTimeoutRef.current !== null) {
         window.clearTimeout(noticeTimeoutRef.current);
       }
