@@ -16,7 +16,7 @@ import {
 import { BrandEmblem } from './BrandEmblem.tsx';
 import { ImageFramingModal } from './ImageFramingModal.tsx';
 import { CafeInfo, StorefrontTheme } from '../types/index.ts';
-import { DEFAULT_CAFE_INFO } from '../data/menuData.ts';
+import { DEFAULT_CAFE_INFO } from '../catalog/menuData.ts';
 import {
   CompressionResult,
   estimateDataUrlSizeBytes,

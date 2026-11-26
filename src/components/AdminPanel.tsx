@@ -27,7 +27,7 @@ import { FoodItem, Category, PortionSizeKey, PortionTier, PricingMode, CafeInfo,
 import { getItemDisplayPrice, isFixedPriceItem } from '../utils/cart.ts';
 import { resolveItemAvailability, summarizeAvailability } from '../lib/availability.ts';
 import { MenuPopup } from '../types/popup.ts';
-import { DEFAULT_CATEGORIES, DEFAULT_CAFE_INFO } from '../data/menuData.ts';
+import { DEFAULT_CATEGORIES, DEFAULT_CAFE_INFO } from '../catalog/menuData.ts';
 import {
   CATEGORY_ICON_OPTIONS,
   DEFAULT_CUSTOM_ICON_ID,
@@ -35,7 +35,7 @@ import {
   isCategoryImageUrl,
   renderCategoryLogo,
   sanitizeCategoryImageUrlInput,
-} from '../data/categoryIcons.tsx';
+} from '../catalog/categoryIcons.tsx';
 import { BrandEmblem } from './BrandEmblem.tsx';
 import { PopupBannerAdmin } from './PopupBannerAdmin.tsx';
 import { BrandLogoAdmin } from './BrandLogoAdmin.tsx';
