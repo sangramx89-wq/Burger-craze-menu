@@ -24,19 +24,14 @@ import { CafeInfo, PortalTarget, ServiceControlState, SuperAdminLogEntry } from 
 import {
   DEFAULT_PAUSE_MESSAGE,
   DEFAULT_PAUSE_TITLE,
+  clearPortalSession,
   clearRememberedPortalEmail,
   getRememberedPortalEmail,
+  hasActivePortalSession,
+  savePortalSession,
+  validateSuperAdminCredentials,
 } from '../lib/serviceControl.ts';
-import {
-  claimFirstRunPortalAccount,
-  completeSupabasePasswordRecovery,
-  getPortalAuthStatus,
-  sendSupabasePasswordReset,
-  signInToPortal,
-  signOutFromPortal,
-  signUpSupabaseStaffAccount,
-} from '../lib/portalAuth.ts';
-import { DEFAULT_CAFE_INFO } from '../catalog/menuData.ts';
+import { DEFAULT_CAFE_INFO } from '../data/menuData.ts';
 
 interface SuperAdminPortalProps {
   serviceControl: ServiceControlState;
@@ -78,13 +73,9 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
   onResetCafeInfoDefaults,
   onNavigatePortal,
 }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
-  const [authMode, setAuthMode] = useState<'supabase' | 'server'>('server');
-  const [needsFirstRunSetup, setNeedsFirstRunSetup] = useState<boolean>(false);
-  const [serverUnavailable, setServerUnavailable] = useState<boolean>(false);
-  const [supabaseActionMode, setSupabaseActionMode] = useState<'signin' | 'signup' | 'recovery'>('signin');
-  const [isAuthSubmitting, setIsAuthSubmitting] = useState<boolean>(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() =>
+    hasActivePortalSession('superadmin')
+  );
   const [rememberedEmail, setRememberedEmail] = useState<string>(() =>
     getRememberedPortalEmail('superadmin')
   );
@@ -92,11 +83,9 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
     getRememberedPortalEmail('superadmin')
   );
   const [passwordInput, setPasswordInput] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState('');
-  const [authInfo, setAuthInfo] = useState('');
 
   // Draft maintenance notice fields
   const [draftTitle, setDraftTitle] = useState(serviceControl.pauseTitle);
@@ -109,137 +98,30 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
     setDraftMessage(serviceControl.pauseMessage);
   }, [serviceControl.pauseTitle, serviceControl.pauseMessage]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setIsAuthChecking(true);
-    void getPortalAuthStatus('superadmin')
-      .then((status) => {
-        if (cancelled) return;
-        setAuthMode(status.mode);
-        setNeedsFirstRunSetup(status.needsFirstRunSetup);
-        setServerUnavailable(Boolean(status.serverUnavailable));
-        if (status.needsPasswordRecovery) {
-          setSupabaseActionMode('recovery');
-          if (status.email) setEmailInput(status.email);
-        }
-        setIsAuthenticated(Boolean(status.authenticated));
-      })
-      .finally(() => {
-        if (!cancelled) setIsAuthChecking(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const isPasswordCreateFlow =
-    (needsFirstRunSetup && authMode === 'server') ||
-    (authMode === 'supabase' && (supabaseActionMode === 'signup' || supabaseActionMode === 'recovery'));
-
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isAuthSubmitting) return;
-
-    if (isPasswordCreateFlow) {
-      if (passwordInput.length < 8) {
-        setAuthError('Password must be at least 8 characters.');
-        return;
-      }
-      if (passwordInput !== confirmPassword) {
-        setAuthError('Passwords do not match.');
-        return;
-      }
-    }
-
-    setIsAuthSubmitting(true);
-    setAuthError('');
-    setAuthInfo('');
-    try {
-      let result;
-      if (authMode === 'supabase' && supabaseActionMode === 'recovery') {
-        result = await completeSupabasePasswordRecovery({
-          role: 'superadmin',
-          newPassword: passwordInput,
-          rememberMe,
-        });
-      } else if (authMode === 'supabase' && supabaseActionMode === 'signup') {
-        result = await signUpSupabaseStaffAccount({
-          role: 'superadmin',
-          email: emailInput,
-          password: passwordInput,
-          rememberMe,
-        });
-      } else if (needsFirstRunSetup && authMode === 'server') {
-        result = await claimFirstRunPortalAccount({
-          role: 'superadmin',
-          email: emailInput,
-          password: passwordInput,
-          rememberMe,
-        });
-      } else {
-        result = await signInToPortal({
-          role: 'superadmin',
-          email: emailInput,
-          password: passwordInput,
-          rememberMe,
-        });
-      }
-
-      if (result.ok) {
-        const normalizedEmail = (result.email || emailInput).trim();
-        setRememberedEmail(rememberMe ? normalizedEmail : '');
-        setNeedsFirstRunSetup(false);
-        setSupabaseActionMode('signin');
-        setIsAuthenticated(true);
-        setAuthError('');
-        setAuthInfo('');
-        setPasswordInput('');
-        setConfirmPassword('');
-        setRememberMe(false);
-      } else if (result.pendingEmailConfirmation && result.info) {
-        setAuthInfo(result.info);
-        setSupabaseActionMode('signin');
-        setPasswordInput('');
-        setConfirmPassword('');
-      } else {
-        setAuthError(result.error || 'Authentication failed.');
-      }
-    } finally {
-      setIsAuthSubmitting(false);
+    if (validateSuperAdminCredentials(emailInput, passwordInput)) {
+      const normalizedEmail = emailInput.trim();
+      savePortalSession('superadmin', normalizedEmail, rememberMe);
+      setRememberedEmail(rememberMe ? normalizedEmail : '');
+      setIsAuthenticated(true);
+      setAuthError('');
+      setPasswordInput('');
+      setRememberMe(false);
+    } else {
+      setAuthError('Invalid Super Admin ID or password.');
     }
   };
 
-  const handleForgotPassword = async () => {
-    if (isAuthSubmitting) return;
-    setIsAuthSubmitting(true);
-    setAuthError('');
-    setAuthInfo('');
-    try {
-      const result = await sendSupabasePasswordReset({
-        role: 'superadmin',
-        email: emailInput,
-      });
-      if (result.ok && result.info) {
-        setAuthInfo(result.info);
-      } else {
-        setAuthError(result.error || 'Unable to send password reset email.');
-      }
-    } finally {
-      setIsAuthSubmitting(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await signOutFromPortal('superadmin');
+  const handleLogout = () => {
+    clearPortalSession('superadmin');
     const savedEmail = getRememberedPortalEmail('superadmin');
     setIsAuthenticated(false);
     setRememberedEmail(savedEmail);
     setEmailInput(savedEmail);
     setPasswordInput('');
-    setConfirmPassword('');
     setRememberMe(false);
     setAuthError('');
-    setAuthInfo('');
   };
 
   const handleForgetSavedEmail = () => {
@@ -247,7 +129,6 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
     setRememberedEmail('');
     setEmailInput('');
     setAuthError('');
-    setAuthInfo('');
   };
 
   const appendUpdate = (
@@ -320,19 +201,6 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
 
   const cafeName = cafeInfo.cafeName?.trim() || DEFAULT_CAFE_INFO.cafeName || 'The Burger Craze';
 
-  if (isAuthChecking) {
-    return (
-      <div className="min-h-screen bg-[#18110D] text-[#FFFDF9] flex flex-col items-center justify-center p-6">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-[#FDBA74] border-t-transparent animate-spin" />
-          <span className="text-xs font-semibold text-[#D8C7B6]">
-            Verifying Super Admin session...
-          </span>
-        </div>
-      </div>
-    );
-  }
-
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-[#18110D] text-[#FFFDF9] flex flex-col items-center justify-center p-4 sm:p-6">
@@ -340,158 +208,60 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
           <div className="bg-gradient-to-br from-[#23150E] via-[#342015] to-[#43291B] text-white px-6 py-6 flex flex-col items-center text-center">
             <BrandEmblem logoUrl={brandLogo} brandName={cafeName} size="md" />
             <span className="mt-3 text-[10px] uppercase tracking-[0.25em] font-bold text-[#FDBA74]">
-              {needsFirstRunSetup && authMode === 'server'
-                ? 'FIRST-RUN SUPER ADMIN SETUP'
-                : 'SUPER ADMIN CONTROL PLANE'}
+              SUPER ADMIN CONTROL PLANE
             </span>
             <h1 className="font-serif text-xl sm:text-2xl font-bold text-white mt-1">
               {cafeName}
             </h1>
             <p className="text-xs text-[#D8C7B6] mt-1">
-              {needsFirstRunSetup && authMode === 'server'
-                ? 'Set the initial Super Admin login. Setup locks automatically once claimed.'
-                : 'Sign in to manage service uptime, maintenance mode, and admin access.'}
+              Sign in to manage service uptime, maintenance mode, and admin access.
             </p>
           </div>
 
-          <form onSubmit={(e) => void handleLogin(e)} className="p-6 space-y-4 text-xs">
-            {authMode === 'supabase' ? (
-              <div className="space-y-2.5">
-                <div className="px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] font-medium">
-                  Secured by <strong>Supabase Auth</strong> &amp; <code className="font-mono">superadmin</code> role check.
-                </div>
-                {supabaseActionMode !== 'recovery' && (
-                  <div
-                    role="tablist"
-                    aria-label="Super Admin authentication mode"
-                    className="grid grid-cols-2 p-1 rounded-xl bg-[#FAF6EE] border border-[#E6DACB] gap-1"
-                  >
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={supabaseActionMode === 'signin'}
-                      onClick={() => {
-                        setSupabaseActionMode('signin');
-                        setAuthError('');
-                        setAuthInfo('');
-                      }}
-                      className={`py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
-                        supabaseActionMode === 'signin'
-                          ? 'bg-[#2D1B11] text-white shadow-2xs'
-                          : 'text-[#6B5746] hover:text-[#2C1C12]'
-                      }`}
-                    >
-                      Sign In
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={supabaseActionMode === 'signup'}
-                      onClick={() => {
-                        setSupabaseActionMode('signup');
-                        setAuthError('');
-                        setAuthInfo('');
-                      }}
-                      className={`py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
-                        supabaseActionMode === 'signup'
-                          ? 'bg-[#2D1B11] text-white shadow-2xs'
-                          : 'text-[#6B5746] hover:text-[#2C1C12]'
-                      }`}
-                    >
-                      First-Time Setup
-                    </button>
-                  </div>
-                )}
-                {supabaseActionMode === 'signup' && (
-                  <p className="text-[11px] text-[#6B5746] leading-relaxed">
-                    Creates your Supabase Auth login password. Only emails assigned{' '}
-                    <code className="font-mono font-semibold">superadmin</code> in{' '}
-                    <code className="font-mono font-semibold">authorized_staff</code> can unlock this console.
-                  </p>
-                )}
-                {supabaseActionMode === 'recovery' && (
-                  <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-medium">
-                    Password reset verified. Choose a new password (min 8 characters) to continue.
-                  </div>
-                )}
-              </div>
-            ) : (
-              serverUnavailable && (
-                <div className="px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] leading-relaxed space-y-1">
-                  <p className="font-bold">Supabase Environment Variables Missing</p>
-                  <p>
-                    This static host has no backend auth API. Add{' '}
-                    <code className="font-mono font-semibold">VITE_SUPABASE_URL</code> and{' '}
-                    <code className="font-mono font-semibold">VITE_SUPABASE_ANON_KEY</code> in{' '}
-                    <strong>Vercel → Project Settings → Environment Variables</strong>, then redeploy.
-                  </p>
-                </div>
-              )
-            )}
-
-            {supabaseActionMode !== 'recovery' && (
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <label htmlFor="superadmin-id" className="block font-bold text-[#5C4533]">
-                    Super Admin ID (Email)
-                  </label>
-                  {rememberedEmail && (
-                    <button
-                      type="button"
-                      onClick={handleForgetSavedEmail}
-                      className="text-[11px] font-semibold text-[#D4621A] hover:underline cursor-pointer"
-                    >
-                      Forget email
-                    </button>
-                  )}
-                </div>
-                <input
-                  id="superadmin-id"
-                  type="email"
-                  required
-                  autoFocus={!rememberedEmail}
-                  autoComplete="username"
-                  placeholder="Enter super admin email"
-                  value={emailInput}
-                  onChange={(e) => {
-                    setEmailInput(e.target.value);
-                    setAuthError('');
-                    setAuthInfo('');
-                  }}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[#E0D2C2] text-[#2C1C12] font-medium focus:outline-none focus:ring-2 focus:ring-[#D4621A]"
-                />
-              </div>
-            )}
-
+          <form onSubmit={handleLogin} className="p-6 space-y-4 text-xs">
             <div>
               <div className="flex items-center justify-between gap-2 mb-1.5">
-                <label htmlFor="superadmin-password" className="block font-bold text-[#5C4533]">
-                  {supabaseActionMode === 'recovery'
-                    ? 'New Password (min 8 characters)'
-                    : isPasswordCreateFlow
-                    ? 'Create Password (min 8 characters)'
-                    : 'Password'}
+                <label htmlFor="superadmin-id" className="block font-bold text-[#5C4533]">
+                  Super Admin ID (Email)
                 </label>
-                {authMode === 'supabase' && supabaseActionMode === 'signin' && (
+                {rememberedEmail && (
                   <button
                     type="button"
-                    onClick={() => void handleForgotPassword()}
-                    disabled={isAuthSubmitting}
-                    className="text-[11px] font-semibold text-[#D4621A] hover:underline cursor-pointer disabled:opacity-50"
+                    onClick={handleForgetSavedEmail}
+                    className="text-[11px] font-semibold text-[#D4621A] hover:underline cursor-pointer"
                   >
-                    Forgot password?
+                    Forget email
                   </button>
                 )}
               </div>
+              <input
+                id="superadmin-id"
+                type="email"
+                required
+                autoFocus={!rememberedEmail}
+                autoComplete="username"
+                placeholder="Enter super admin email"
+                value={emailInput}
+                onChange={(e) => {
+                  setEmailInput(e.target.value);
+                  setAuthError('');
+                }}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[#E0D2C2] text-[#2C1C12] font-medium focus:outline-none focus:ring-2 focus:ring-[#D4621A]"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="superadmin-password" className="block font-bold text-[#5C4533] mb-1.5">
+                Password
+              </label>
               <div className="relative">
                 <input
                   id="superadmin-password"
                   type={showPassword ? 'text' : 'password'}
                   required
-                  minLength={isPasswordCreateFlow ? 8 : undefined}
-                  autoFocus={Boolean(rememberedEmail) || supabaseActionMode === 'recovery'}
-                  autoComplete={isPasswordCreateFlow ? 'new-password' : 'current-password'}
-                  placeholder={isPasswordCreateFlow ? 'At least 8 characters' : 'Enter password'}
+                  autoFocus={Boolean(rememberedEmail)}
+                  autoComplete="current-password"
+                  placeholder="Enter password"
                   value={passwordInput}
                   onChange={(e) => {
                     setPasswordInput(e.target.value);
@@ -509,31 +279,6 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
                 </button>
               </div>
             </div>
-
-            {isPasswordCreateFlow && (
-              <div>
-                <label
-                  htmlFor="superadmin-confirm-password"
-                  className="block font-bold text-[#5C4533] mb-1.5"
-                >
-                  Confirm Password
-                </label>
-                <input
-                  id="superadmin-confirm-password"
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  minLength={8}
-                  autoComplete="new-password"
-                  placeholder="Re-enter password"
-                  value={confirmPassword}
-                  onChange={(e) => {
-                    setConfirmPassword(e.target.value);
-                    setAuthError('');
-                  }}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[#E0D2C2] text-[#2C1C12] font-medium focus:outline-none focus:ring-2 focus:ring-[#D4621A]"
-                />
-              </div>
-            )}
 
             <label
               htmlFor="superadmin-remember-me"
@@ -556,34 +301,18 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
               </span>
             </label>
 
-            {authInfo && (
-              <div className="flex items-start gap-2 text-emerald-800 bg-emerald-50 px-3 py-2.5 rounded-xl border border-emerald-200 font-medium leading-relaxed">
-                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{authInfo}</span>
-              </div>
-            )}
-
             {authError && (
-              <div className="flex items-start gap-2 text-rose-700 bg-rose-50 px-3 py-2.5 rounded-xl border border-rose-200 font-medium leading-relaxed">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="flex items-center gap-2 text-rose-700 bg-rose-50 px-3 py-2 rounded-xl border border-rose-200 font-medium">
+                <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{authError}</span>
               </div>
             )}
 
             <button
               type="submit"
-              disabled={isAuthSubmitting}
-              className="w-full min-h-[42px] py-2.5 rounded-xl bg-[#2D1B11] hover:bg-[#1E120B] text-white font-semibold text-xs sm:text-sm transition-all active:scale-95 cursor-pointer shadow-xs disabled:opacity-60"
+              className="w-full min-h-[42px] py-2.5 rounded-xl bg-[#2D1B11] hover:bg-[#1E120B] text-white font-semibold text-xs sm:text-sm transition-all active:scale-95 cursor-pointer shadow-xs"
             >
-              {isAuthSubmitting
-                ? 'Verifying...'
-                : authMode === 'supabase' && supabaseActionMode === 'recovery'
-                ? 'Update Password & Sign In'
-                : authMode === 'supabase' && supabaseActionMode === 'signup'
-                ? 'Activate Super Admin Account'
-                : needsFirstRunSetup && authMode === 'server'
-                ? 'Create Super Admin & Sign In'
-                : 'Sign In to Super Admin'}
+              Sign In to Super Admin
             </button>
 
             <div className="pt-2 border-t border-[#F0E6D8] flex items-center justify-between text-[11px]">

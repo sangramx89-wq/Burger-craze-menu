@@ -9,14 +9,14 @@ import {
   X,
   Image as ImageIcon,
 } from 'lucide-react';
-import { DEFAULT_CATEGORIES } from '../catalog/menuData.ts';
+import { DEFAULT_CATEGORIES } from '../data/menuData.ts';
 import {
   CATEGORY_ICON_OPTIONS,
   getCategoryIconLabel,
   isCategoryImageUrl,
   renderCategoryLogo,
   sanitizeCategoryImageUrlInput,
-} from '../catalog/categoryIcons.tsx';
+} from '../data/categoryIcons.tsx';
 import { CompressionResult } from '../lib/imageCompressor.ts';
 import { uploadCompressedMediaToStorage } from '../lib/mediaStorage.ts';
 import { ImageFramingModal } from './ImageFramingModal.tsx';

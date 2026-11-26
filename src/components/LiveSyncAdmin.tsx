@@ -159,45 +159,24 @@ export const LiveSyncAdmin: React.FC<LiveSyncAdminProps> = ({
           <div className="space-y-1">
             <h2 className="font-serif text-base sm:text-lg font-bold text-[#2C1C12]">
               {!report?.configured
-                ? report?.configStatus.issue === 'invalid-url'
-                  ? 'Invalid Supabase Project URL'
-                  : report?.configStatus.issue === 'missing-url' ||
-                    report?.configStatus.issue === 'missing-key'
-                  ? 'Incomplete Supabase Configuration'
-                  : 'Local-Only Mode (Supabase Env Vars Missing)'
+                ? 'Local-Only Mode (Supabase Env Vars Pending)'
                 : allBackendChecksReady && !lastSyncError
                 ? syncStatus === 'live'
                   ? 'Supabase Connected & Live Sync Active'
                   : 'Supabase Schema Ready'
-                : 'Supabase Connected — Attention Needed'}
+                : 'Supabase Connected — Database Setup Required'}
             </h2>
             <p className="text-xs text-[#5C4533] leading-relaxed">
               {!report?.configured
-                ? report?.configStatus.errorMessage ||
-                  'Edits currently save in this browser only. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to Vercel Environment Variables, then trigger a fresh Redeploy.'
+                ? 'Edits currently save in this browser only. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment variables, run the SQL script below, and redeploy or restart so customer phones sync live.'
                 : allBackendChecksReady && !lastSyncError
-                ? `Connected to ${report.configStatus.host || 'Supabase'}${
-                    report.staffSession?.authorized
-                      ? ` as ${report.staffSession.email} (${report.staffSession.role})`
-                      : ''
-                  }. Any dish, availability, branding, or pop-up change persists in Postgres and syncs live to customer phones.`
+                ? 'Any dish, availability, branding, or pop-up change made here persists in Postgres and pushes live to all connected customer phones.'
                 : lastSyncError ||
-                  report?.staffSession?.error ||
                   report?.storefrontTable.error ||
                   report?.popupsTable.error ||
                   report?.storageBucket.error ||
                   'Run the SQL Setup Script in your Supabase SQL Editor to finish configuring tables, Realtime, and storage.'}
             </p>
-            {!report?.configured && report?.configStatus.missingVars && report.configStatus.missingVars.length > 0 && (
-              <p className="text-[11px] font-medium text-[#9A3412]">
-                Missing in build: <code className="font-mono">{report.configStatus.missingVars.join(', ')}</code>
-              </p>
-            )}
-            {!report?.configured && (
-              <p className="text-[11px] text-[#7A6452] leading-relaxed">
-                Already added in Vercel? Ensure both variables are enabled for <strong>Production</strong>, then open Vercel <strong>Deployments → Redeploy</strong> (uncheck build cache) because Vite injects <code className="font-mono">VITE_*</code> variables at build time.
-              </p>
-            )}
             {lastSyncedAt && (
               <p className="text-[11px] font-medium text-emerald-800 tabular-nums">
                 Last cloud sync: {new Date(lastSyncedAt).toLocaleTimeString()}
@@ -271,41 +250,16 @@ export const LiveSyncAdmin: React.FC<LiveSyncAdminProps> = ({
             </span>
             <span
               className={`text-[11px] font-bold ${
-                report?.configured
-                  ? 'text-emerald-700'
-                  : report?.configStatus.issue === 'invalid-url'
-                  ? 'text-rose-700'
-                  : 'text-amber-700'
+                report?.configured ? 'text-emerald-700' : 'text-amber-700'
               }`}
             >
-              {report?.configured
-                ? 'Detected'
-                : report?.configStatus.issue === 'invalid-url'
-                ? 'Invalid URL'
-                : report?.configStatus.issue === 'missing-url'
-                ? 'URL Missing'
-                : report?.configStatus.issue === 'missing-key'
-                ? 'Key Missing'
-                : 'Missing'}
+              {report?.configured ? 'Detected' : 'Missing'}
             </span>
           </div>
           <p className="text-[11px] text-[#6B5746]">
             {report?.configured
-              ? `Host: ${report.configStatus.host || 'Supabase'} · Realtime: ${
-                  syncStatus === 'live'
-                    ? 'Live'
-                    : syncStatus === 'connecting'
-                    ? 'Connecting'
-                    : 'REST Fallback'
-                }${
-                  report.staffSession?.signedIn
-                    ? report.staffSession.authorized
-                      ? ' · Staff Auth OK'
-                      : ' · Staff Auth Error'
-                    : ''
-                }.`
-              : report?.configStatus.errorMessage ||
-                'Set VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY and redeploy.'}
+              ? 'VITE_SUPABASE_URL & anon key loaded.'
+              : 'Set VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY in environment settings.'}
           </p>
         </div>
 

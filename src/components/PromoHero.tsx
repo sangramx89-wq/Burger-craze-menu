@@ -1,6 +1,6 @@
 import React from 'react';
 import { m } from 'motion/react';
-import { HERO_BANNER_IMG } from '../catalog/menuData.ts';
+import { HERO_BANNER_IMG } from '../data/menuData.ts';
 import { StorefrontTheme } from '../types/index.ts';
 import { ProgressiveImage } from './ProgressiveImage.tsx';
 

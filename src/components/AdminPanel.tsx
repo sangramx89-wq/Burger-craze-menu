@@ -27,7 +27,7 @@ import { FoodItem, Category, PortionSizeKey, PortionTier, PricingMode, CafeInfo,
 import { getItemDisplayPrice, isFixedPriceItem } from '../utils/cart.ts';
 import { resolveItemAvailability, summarizeAvailability } from '../lib/availability.ts';
 import { MenuPopup } from '../types/popup.ts';
-import { DEFAULT_CATEGORIES, DEFAULT_CAFE_INFO } from '../catalog/menuData.ts';
+import { DEFAULT_CATEGORIES, DEFAULT_CAFE_INFO } from '../data/menuData.ts';
 import {
   CATEGORY_ICON_OPTIONS,
   DEFAULT_CUSTOM_ICON_ID,
@@ -35,7 +35,7 @@ import {
   isCategoryImageUrl,
   renderCategoryLogo,
   sanitizeCategoryImageUrlInput,
-} from '../catalog/categoryIcons.tsx';
+} from '../data/categoryIcons.tsx';
 import { BrandEmblem } from './BrandEmblem.tsx';
 import { PopupBannerAdmin } from './PopupBannerAdmin.tsx';
 import { BrandLogoAdmin } from './BrandLogoAdmin.tsx';
@@ -45,18 +45,13 @@ import { LiveSyncAdmin } from './LiveSyncAdmin.tsx';
 import { ImageFramingModal } from './ImageFramingModal.tsx';
 import { ResetConfirmModal } from './ResetConfirmModal.tsx';
 import {
+  clearPortalSession,
   clearRememberedPortalEmail,
   getRememberedPortalEmail,
+  hasActivePortalSession,
+  savePortalSession,
+  validateAdminCredentials,
 } from '../lib/serviceControl.ts';
-import {
-  claimFirstRunPortalAccount,
-  completeSupabasePasswordRecovery,
-  getPortalAuthStatus,
-  sendSupabasePasswordReset,
-  signInToPortal,
-  signOutFromPortal,
-  signUpSupabaseStaffAccount,
-} from '../lib/portalAuth.ts';
 import { RealtimeSyncStatus } from '../lib/realtimeMenuSync.ts';
 import {
   CompressionResult,
@@ -169,13 +164,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   isServicePaused = false,
 }) => {
   const cafeName = cafeInfo.cafeName?.trim() || DEFAULT_CAFE_INFO.cafeName || 'The Burger Craze';
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
-  const [authMode, setAuthMode] = useState<'supabase' | 'server'>('server');
-  const [needsFirstRunSetup, setNeedsFirstRunSetup] = useState<boolean>(false);
-  const [serverUnavailable, setServerUnavailable] = useState<boolean>(false);
-  const [supabaseActionMode, setSupabaseActionMode] = useState<'signin' | 'signup' | 'recovery'>('signin');
-  const [isAuthSubmitting, setIsAuthSubmitting] = useState<boolean>(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() =>
+    hasActivePortalSession('admin')
+  );
   const [rememberedEmail, setRememberedEmail] = useState<string>(() =>
     getRememberedPortalEmail('admin')
   );
@@ -183,37 +174,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     getRememberedPortalEmail('admin')
   );
   const [adminPassword, setAdminPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState('');
-  const [authInfo, setAuthInfo] = useState('');
   const [adminTab, setAdminTab] = useState<
     'dishes' | 'categories' | 'popups' | 'branding' | 'qr' | 'sync'
   >('dishes');
-
-  React.useEffect(() => {
-    let cancelled = false;
-    setIsAuthChecking(true);
-    void getPortalAuthStatus('admin')
-      .then((status) => {
-        if (cancelled) return;
-        setAuthMode(status.mode);
-        setNeedsFirstRunSetup(status.needsFirstRunSetup);
-        setServerUnavailable(Boolean(status.serverUnavailable));
-        if (status.needsPasswordRecovery) {
-          setSupabaseActionMode('recovery');
-          if (status.email) setAdminEmail(status.email);
-        }
-        setIsAuthenticated(Boolean(status.authenticated && !isAdminLocked));
-      })
-      .finally(() => {
-        if (!cancelled) setIsAuthChecking(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isAdminLocked]);
 
   // Search & Filter state in Admin
   const [searchQuery, setSearchQuery] = useState('');
@@ -272,119 +238,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     error?: string;
   }>({});
 
-  // Async Portal Authentication (Supabase Auth + authorized_staff OR Server Auth fallback)
-  const isPasswordCreateFlow =
-    (needsFirstRunSetup && authMode === 'server') ||
-    (authMode === 'supabase' && (supabaseActionMode === 'signup' || supabaseActionMode === 'recovery'));
-
-  const handleVerifyLogin = async (e: React.FormEvent) => {
+  // Email & Password authentication verification
+  const handleVerifyLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (isAdminLocked) {
       setAuthError('Admin Portal access is currently suspended by Super Admin.');
       return;
     }
-    if (isAuthSubmitting) return;
-
-    if (isPasswordCreateFlow) {
-      if (adminPassword.length < 8) {
-        setAuthError('Password must be at least 8 characters.');
-        return;
-      }
-      if (adminPassword !== confirmPassword) {
-        setAuthError('Passwords do not match.');
-        return;
-      }
-    }
-
-    setIsAuthSubmitting(true);
-    setAuthError('');
-    setAuthInfo('');
-    try {
-      let result;
-      if (authMode === 'supabase' && supabaseActionMode === 'recovery') {
-        result = await completeSupabasePasswordRecovery({
-          role: 'admin',
-          newPassword: adminPassword,
-          rememberMe,
-        });
-      } else if (authMode === 'supabase' && supabaseActionMode === 'signup') {
-        result = await signUpSupabaseStaffAccount({
-          role: 'admin',
-          email: adminEmail,
-          password: adminPassword,
-          rememberMe,
-        });
-      } else if (needsFirstRunSetup && authMode === 'server') {
-        result = await claimFirstRunPortalAccount({
-          role: 'admin',
-          email: adminEmail,
-          password: adminPassword,
-          rememberMe,
-        });
-      } else {
-        result = await signInToPortal({
-          role: 'admin',
-          email: adminEmail,
-          password: adminPassword,
-          rememberMe,
-        });
-      }
-
-      if (result.ok) {
-        const normalizedEmail = (result.email || adminEmail).trim();
-        setRememberedEmail(rememberMe ? normalizedEmail : '');
-        setNeedsFirstRunSetup(false);
-        setSupabaseActionMode('signin');
-        setIsAuthenticated(true);
-        setAuthError('');
-        setAuthInfo('');
-        setAdminPassword('');
-        setConfirmPassword('');
-        setRememberMe(false);
-      } else if (result.pendingEmailConfirmation && result.info) {
-        setAuthInfo(result.info);
-        setSupabaseActionMode('signin');
-        setAdminPassword('');
-        setConfirmPassword('');
-      } else {
-        setAuthError(result.error || 'Authentication failed.');
-      }
-    } finally {
-      setIsAuthSubmitting(false);
+    if (validateAdminCredentials(adminEmail, adminPassword)) {
+      const normalizedEmail = adminEmail.trim();
+      savePortalSession('admin', normalizedEmail, rememberMe);
+      setRememberedEmail(rememberMe ? normalizedEmail : '');
+      setIsAuthenticated(true);
+      setAuthError('');
+      setAdminPassword('');
+      setRememberMe(false);
+    } else {
+      setAuthError('Invalid Admin ID or password.');
     }
   };
 
-  const handleForgotPassword = async () => {
-    if (isAuthSubmitting) return;
-    setIsAuthSubmitting(true);
-    setAuthError('');
-    setAuthInfo('');
-    try {
-      const result = await sendSupabasePasswordReset({
-        role: 'admin',
-        email: adminEmail,
-      });
-      if (result.ok && result.info) {
-        setAuthInfo(result.info);
-      } else {
-        setAuthError(result.error || 'Unable to send password reset email.');
-      }
-    } finally {
-      setIsAuthSubmitting(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await signOutFromPortal('admin');
+  const handleLogout = () => {
+    clearPortalSession('admin');
     const savedEmail = getRememberedPortalEmail('admin');
     setIsAuthenticated(false);
     setRememberedEmail(savedEmail);
     setAdminEmail(savedEmail);
     setAdminPassword('');
-    setConfirmPassword('');
     setRememberMe(false);
     setAuthError('');
-    setAuthInfo('');
   };
 
   const handleForgetSavedEmail = () => {
@@ -392,7 +274,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setRememberedEmail('');
     setAdminEmail('');
     setAuthError('');
-    setAuthInfo('');
   };
 
   // Dish image upload handler: stage draft in interactive framing modal before confirming
@@ -684,175 +565,67 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
         </div>
-      ) : isAuthChecking ? (
-        <div className="flex-1 flex items-center justify-center p-6">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 rounded-full border-2 border-[#D4621A] border-t-transparent animate-spin" />
-            <span className="text-xs font-semibold text-[#7A6452]">
-              Verifying portal session...
-            </span>
-          </div>
-        </div>
       ) : !isAuthenticated ? (
-        /* Email & Password Login / First-Run Claim Screen */
+        /* Email & Password Login Screen */
         <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
           <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-[#EDE2D2] overflow-hidden">
             <div className="bg-gradient-to-br from-[#2D1B11] via-[#3B2519] to-[#482F20] text-white px-6 py-6 flex flex-col items-center text-center">
               <BrandEmblem logoUrl={brandLogo} brandName={cafeName} size="md" />
               <span className="mt-3 text-[10px] uppercase tracking-[0.25em] font-bold text-[#FDBA74]">
-                {needsFirstRunSetup && authMode === 'server'
-                  ? 'FIRST-RUN ADMIN SETUP'
-                  : 'STORE ADMIN PORTAL'}
+                STORE ADMIN PORTAL
               </span>
               <h1 className="font-serif text-xl sm:text-2xl font-bold text-white mt-1">
                 {cafeName}
               </h1>
               <p className="text-xs text-[#D8C7B6] mt-1">
-                {needsFirstRunSetup && authMode === 'server'
-                  ? 'Create the initial Store Admin credentials. Setup locks automatically once saved.'
-                  : 'Sign in to manage menu dishes, promotional banners, logo, and café info.'}
+                Sign in to manage menu dishes, promotional banners, logo, and café info.
               </p>
             </div>
 
-            <form onSubmit={(e) => void handleVerifyLogin(e)} className="p-6 space-y-4 text-xs">
-              {authMode === 'supabase' ? (
-                <div className="space-y-2.5">
-                  <div className="px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] font-medium">
-                    Secured by <strong>Supabase Auth</strong> &amp; <code className="font-mono">authorized_staff</code> allowlist.
-                  </div>
-                  {supabaseActionMode !== 'recovery' && (
-                    <div
-                      role="tablist"
-                      aria-label="Admin authentication mode"
-                      className="grid grid-cols-2 p-1 rounded-xl bg-[#FAF6EE] border border-[#E6DACB] gap-1"
-                    >
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={supabaseActionMode === 'signin'}
-                        onClick={() => {
-                          setSupabaseActionMode('signin');
-                          setAuthError('');
-                          setAuthInfo('');
-                        }}
-                        className={`py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
-                          supabaseActionMode === 'signin'
-                            ? 'bg-[#D4621A] text-white shadow-2xs'
-                            : 'text-[#6B5746] hover:text-[#2C1C12]'
-                        }`}
-                      >
-                        Sign In
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={supabaseActionMode === 'signup'}
-                        onClick={() => {
-                          setSupabaseActionMode('signup');
-                          setAuthError('');
-                          setAuthInfo('');
-                        }}
-                        className={`py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
-                          supabaseActionMode === 'signup'
-                            ? 'bg-[#D4621A] text-white shadow-2xs'
-                            : 'text-[#6B5746] hover:text-[#2C1C12]'
-                        }`}
-                      >
-                        First-Time Setup
-                      </button>
-                    </div>
-                  )}
-                  {supabaseActionMode === 'signup' && (
-                    <p className="text-[11px] text-[#6B5746] leading-relaxed">
-                      Creates your Supabase Auth login password. Only emails listed in{' '}
-                      <code className="font-mono font-semibold">authorized_staff</code> can unlock the portal.
-                    </p>
-                  )}
-                  {supabaseActionMode === 'recovery' && (
-                    <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-medium">
-                      Password reset verified. Choose a new password (min 8 characters) to finish signing in.
-                    </div>
-                  )}
-                </div>
-              ) : (
-                serverUnavailable && (
-                  <div className="px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] leading-relaxed space-y-1">
-                    <p className="font-bold">Supabase Environment Variables Missing</p>
-                    <p>
-                      This static host has no backend auth API. Add{' '}
-                      <code className="font-mono font-semibold">VITE_SUPABASE_URL</code> and{' '}
-                      <code className="font-mono font-semibold">VITE_SUPABASE_ANON_KEY</code> in{' '}
-                      <strong>Vercel → Project Settings → Environment Variables</strong>, then redeploy.
-                    </p>
-                  </div>
-                )
-              )}
-
-              {supabaseActionMode !== 'recovery' && (
-                <div>
-                  <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <label htmlFor="admin-email-id" className="block font-bold text-[#5C4533]">
-                      Admin ID (Email)
-                    </label>
-                    {rememberedEmail && (
-                      <button
-                        type="button"
-                        onClick={handleForgetSavedEmail}
-                        className="text-[11px] font-semibold text-[#D4621A] hover:underline cursor-pointer"
-                      >
-                        Forget email
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    id="admin-email-id"
-                    type="email"
-                    required
-                    autoFocus={!rememberedEmail}
-                    autoComplete="username"
-                    placeholder="Enter admin email"
-                    value={adminEmail}
-                    onChange={(e) => {
-                      setAdminEmail(e.target.value);
-                      setAuthError('');
-                      setAuthInfo('');
-                    }}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[#E0D2C2] text-[#2C1C12] font-medium focus:outline-none focus:ring-2 focus:ring-[#D4621A]"
-                  />
-                </div>
-              )}
-
+            <form onSubmit={handleVerifyLogin} className="p-6 space-y-4 text-xs">
               <div>
                 <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <label htmlFor="admin-password" className="block font-bold text-[#5C4533]">
-                    {supabaseActionMode === 'recovery'
-                      ? 'New Password (min 8 characters)'
-                      : isPasswordCreateFlow
-                      ? 'Create Password (min 8 characters)'
-                      : 'Password'}
+                  <label htmlFor="admin-email-id" className="block font-bold text-[#5C4533]">
+                    Admin ID (Email)
                   </label>
-                  {authMode === 'supabase' && supabaseActionMode === 'signin' && (
+                  {rememberedEmail && (
                     <button
                       type="button"
-                      onClick={() => void handleForgotPassword()}
-                      disabled={isAuthSubmitting}
-                      className="text-[11px] font-semibold text-[#D4621A] hover:underline cursor-pointer disabled:opacity-50"
+                      onClick={handleForgetSavedEmail}
+                      className="text-[11px] font-semibold text-[#D4621A] hover:underline cursor-pointer"
                     >
-                      Forgot password?
+                      Forget email
                     </button>
                   )}
                 </div>
+                <input
+                  id="admin-email-id"
+                  type="email"
+                  required
+                  autoFocus={!rememberedEmail}
+                  autoComplete="username"
+                  placeholder="Enter admin email"
+                  value={adminEmail}
+                  onChange={(e) => {
+                    setAdminEmail(e.target.value);
+                    setAuthError('');
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[#E0D2C2] text-[#2C1C12] font-medium focus:outline-none focus:ring-2 focus:ring-[#D4621A]"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="admin-password" className="block font-bold text-[#5C4533] mb-1.5">
+                  Password
+                </label>
                 <div className="relative">
                   <input
                     id="admin-password"
                     type={showPassword ? 'text' : 'password'}
                     required
-                    minLength={isPasswordCreateFlow ? 8 : undefined}
-                    autoFocus={Boolean(rememberedEmail) || supabaseActionMode === 'recovery'}
-                    autoComplete={isPasswordCreateFlow ? 'new-password' : 'current-password'}
-                    placeholder={
-                      isPasswordCreateFlow ? 'At least 8 characters' : 'Enter password'
-                    }
+                    autoFocus={Boolean(rememberedEmail)}
+                    autoComplete="current-password"
+                    placeholder="Enter password"
                     value={adminPassword}
                     onChange={(e) => {
                       setAdminPassword(e.target.value);
@@ -870,31 +643,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </button>
                 </div>
               </div>
-
-              {isPasswordCreateFlow && (
-                <div>
-                  <label
-                    htmlFor="admin-confirm-password"
-                    className="block font-bold text-[#5C4533] mb-1.5"
-                  >
-                    Confirm Password
-                  </label>
-                  <input
-                    id="admin-confirm-password"
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    minLength={8}
-                    autoComplete="new-password"
-                    placeholder="Re-enter password"
-                    value={confirmPassword}
-                    onChange={(e) => {
-                      setConfirmPassword(e.target.value);
-                      setAuthError('');
-                    }}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] border border-[#E0D2C2] text-[#2C1C12] font-medium focus:outline-none focus:ring-2 focus:ring-[#D4621A]"
-                  />
-                </div>
-              )}
 
               <label
                 htmlFor="admin-remember-me"
@@ -917,37 +665,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </span>
               </label>
 
-              {authInfo && (
-                <div className="flex items-start gap-2 text-emerald-800 bg-emerald-50 px-3 py-2.5 rounded-xl border border-emerald-200 font-medium leading-relaxed">
-                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{authInfo}</span>
-                </div>
-              )}
-
               {authError && (
-                <div className="flex items-start gap-2 text-rose-700 bg-rose-50 px-3 py-2.5 rounded-xl border border-rose-200 font-medium leading-relaxed">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div className="flex items-center gap-2 text-rose-700 bg-rose-50 px-3 py-2 rounded-xl border border-rose-200 font-medium">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>{authError}</span>
                 </div>
               )}
 
               <button
                 type="submit"
-                disabled={isAuthSubmitting}
-                className="w-full min-h-[42px] py-2.5 rounded-xl bg-[#D4621A] hover:bg-[#B84E0F] text-white font-semibold text-xs sm:text-sm tracking-wide transition-all shadow-xs active:scale-95 cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
+                className="w-full min-h-[42px] py-2.5 rounded-xl bg-[#D4621A] hover:bg-[#B84E0F] text-white font-semibold text-xs sm:text-sm tracking-wide transition-all shadow-xs active:scale-95 cursor-pointer flex items-center justify-center gap-2"
               >
                 <Lock className="w-4 h-4" />
-                <span>
-                  {isAuthSubmitting
-                    ? 'Verifying...'
-                    : authMode === 'supabase' && supabaseActionMode === 'recovery'
-                    ? 'Update Password & Sign In'
-                    : authMode === 'supabase' && supabaseActionMode === 'signup'
-                    ? 'Activate Staff Account'
-                    : needsFirstRunSetup && authMode === 'server'
-                    ? 'Create Admin Account & Sign In'
-                    : 'Sign In to Admin Portal'}
-                </span>
+                <span>Sign In to Admin Portal</span>
               </button>
 
               <div className="pt-2 border-t border-[#F0E6D8] flex items-center justify-center">

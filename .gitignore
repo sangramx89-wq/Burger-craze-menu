@@ -1,9 +1,7 @@
 node_modules/
-/build/
-/dist/
-/coverage/
-/data/
-!src/data/
+build/
+dist/
+coverage/
 .DS_Store
 *.log
 .env*

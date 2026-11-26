@@ -1,7 +1,7 @@
 import React from 'react';
 import { Category, StorefrontTheme } from '../types/index.ts';
-import { DEFAULT_CATEGORIES } from '../catalog/menuData.ts';
-import { renderCategoryLogo } from '../catalog/categoryIcons.tsx';
+import { DEFAULT_CATEGORIES } from '../data/menuData.ts';
+import { renderCategoryLogo } from '../data/categoryIcons.tsx';
 
 interface CategoryNavProps {
   activeCategory: Category;

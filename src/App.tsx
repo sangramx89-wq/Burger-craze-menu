@@ -40,8 +40,8 @@ import {
   DEFAULT_CAFE_INFO,
   getCategoryMeta,
   normalizeBundledAssetPath,
-} from './catalog/menuData.ts';
-import { DEFAULT_CUSTOM_ICON_ID, renderCategoryLogo } from './catalog/categoryIcons.tsx';
+} from './data/menuData.ts';
+import { DEFAULT_CUSTOM_ICON_ID, renderCategoryLogo } from './data/categoryIcons.tsx';
 import { Category, FoodItem, PortionSizeKey, CafeInfo, PortalTarget, ServiceControlState, StorefrontTheme, SavedDefaultMenuSnapshot } from './types/index.ts';
 import { applyBulkAvailability, resolveItemAvailability } from './lib/availability.ts';
 import { MenuPopup } from './types/popup.ts';
@@ -1104,8 +1104,6 @@ export default function App() {
   // Initial remote sync, Realtime subscription, and focus/reconnect refresh
   useEffect(() => {
     let isMounted = true;
-    const isCustomerPortal = portalTarget === 'customer';
-    let currentChannelStatus: RealtimeSyncStatus = 'local';
 
     const pullLatestRemote = async (notifyOnChange: boolean) => {
       try {
@@ -1116,26 +1114,14 @@ export default function App() {
           remoteEnv?.payload && Array.isArray(remoteEnv.payload.popups)
         );
 
-        if (remoteEnv && recordIncomingRevision(remoteEnv.revision, isCustomerPortal)) {
+        if (remoteEnv && recordIncomingRevision(remoteEnv.revision)) {
           applyRemoteEnvelope(remoteEnv, notifyOnChange);
-          if (isSupabaseConfigured()) {
-            setLastSyncError(null);
-            setLastSyncedAt(new Date().toISOString());
-          }
         } else if (remoteEnv && hasRemotePopups && remoteEnv.payload.popups) {
           setPopups(remoteEnv.payload.popups);
           setLocalPopups(remoteEnv.payload.popups);
-        } else if (!remoteEnv && !isCustomerPortal && isSupabaseConfigured()) {
+        } else if (!remoteEnv && portalTarget !== 'customer') {
           // Seed initial remote snapshot when an Admin opens a fresh database
-          const seedRes = await publishStorefrontState(latestSnapshotRef.current);
-          if (isMounted) {
-            if (!seedRes.ok && seedRes.error) {
-              setLastSyncError(seedRes.error);
-            } else {
-              setLastSyncError(null);
-              setLastSyncedAt(new Date().toISOString());
-            }
-          }
+          await publishStorefrontState(latestSnapshotRef.current);
         }
 
         if (!hasRemotePopups) {
@@ -1154,24 +1140,18 @@ export default function App() {
     void pullLatestRemote(false);
 
     const unsubscribe = subscribeRealtimeSync({
-      allowAnyDifferentRevision: isCustomerPortal,
       onStatusChange: (status) => {
-        currentChannelStatus = status;
         if (isMounted) setSyncStatus(status);
       },
       onStorefrontUpdate: (envelope) => {
         if (!isMounted) return;
         applyRemoteEnvelope(envelope, true);
-        if (isSupabaseConfigured()) {
-          setLastSyncError(null);
-          setLastSyncedAt(new Date().toISOString());
-        }
       },
       onPopupsChanged: () => {
         fetchAllPopups().then((data) => {
           if (isMounted && Array.isArray(data)) {
             setPopups(data);
-            if (isCustomerPortal) {
+            if (portalTarget === 'customer') {
               showMenuUpdatedNotice('Menu updated');
             }
           }
@@ -1185,31 +1165,14 @@ export default function App() {
       }
     };
 
-    // Fallback catch-up sync if a phone's WebSocket drops on restrictive café Wi-Fi
-    const fallbackPollId = isSupabaseConfigured()
-      ? window.setInterval(() => {
-          if (
-            document.visibilityState === 'visible' &&
-            (isCustomerPortal || currentChannelStatus !== 'live')
-          ) {
-            void pullLatestRemote(true);
-          }
-        }, 30000)
-      : null;
-
     document.addEventListener('visibilitychange', handleVisibilityOrOnline);
     window.addEventListener('online', handleVisibilityOrOnline);
-    window.addEventListener('focus', handleVisibilityOrOnline);
 
     return () => {
       isMounted = false;
       unsubscribe();
-      if (fallbackPollId !== null) {
-        window.clearInterval(fallbackPollId);
-      }
       document.removeEventListener('visibilitychange', handleVisibilityOrOnline);
       window.removeEventListener('online', handleVisibilityOrOnline);
-      window.removeEventListener('focus', handleVisibilityOrOnline);
       if (noticeTimeoutRef.current !== null) {
         window.clearTimeout(noticeTimeoutRef.current);
       }
