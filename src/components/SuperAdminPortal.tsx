@@ -36,7 +36,7 @@ import {
   signOutFromPortal,
   signUpSupabaseStaffAccount,
 } from '../lib/portalAuth.ts';
-import { DEFAULT_CAFE_INFO } from '../lib/menuDefaults.ts';
+import { DEFAULT_CAFE_INFO } from '../data/menuData.ts';
 
 interface SuperAdminPortalProps {
   serviceControl: ServiceControlState;

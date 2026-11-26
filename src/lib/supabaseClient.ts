@@ -1,8 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-declare const __VITE_SUPABASE_URL__: string | undefined;
-declare const __VITE_SUPABASE_ANON_KEY__: string | undefined;
-
 export type SupabaseConfigIssue =
   | 'ready'
   | 'missing-both'
@@ -15,6 +12,7 @@ export interface SupabaseConfigStatus {
   issue: SupabaseConfigIssue;
   hasUrl: boolean;
   hasAnonKey: boolean;
+  missingVars: Array<'VITE_SUPABASE_URL' | 'VITE_SUPABASE_ANON_KEY'>;
   url: string | null;
   host: string | null;
   errorMessage?: string;
@@ -46,6 +44,9 @@ export function resolveSupabaseConfig(rawUrl?: string | null, rawAnonKey?: strin
 
   const hasUrl = cleanedUrl.length > 0;
   const hasAnonKey = cleanedKey.length > 0;
+  const missingVars: Array<'VITE_SUPABASE_URL' | 'VITE_SUPABASE_ANON_KEY'> = [];
+  if (!hasUrl) missingVars.push('VITE_SUPABASE_URL');
+  if (!hasAnonKey) missingVars.push('VITE_SUPABASE_ANON_KEY');
 
   if (!hasUrl && !hasAnonKey) {
     return {
@@ -54,9 +55,10 @@ export function resolveSupabaseConfig(rawUrl?: string | null, rawAnonKey?: strin
         issue: 'missing-both',
         hasUrl: false,
         hasAnonKey: false,
+        missingVars,
         url: null,
         host: null,
-        errorMessage: 'VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY were not found in this build.',
+        errorMessage: 'Missing VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in this build.',
       },
       anonKey: null,
     };
@@ -69,9 +71,10 @@ export function resolveSupabaseConfig(rawUrl?: string | null, rawAnonKey?: strin
         issue: 'missing-url',
         hasUrl: false,
         hasAnonKey: true,
+        missingVars,
         url: null,
         host: null,
-        errorMessage: 'VITE_SUPABASE_URL is missing in this build.',
+        errorMessage: 'Missing VITE_SUPABASE_URL in this build.',
       },
       anonKey: null,
     };
@@ -91,10 +94,11 @@ export function resolveSupabaseConfig(rawUrl?: string | null, rawAnonKey?: strin
         issue: 'invalid-url',
         hasUrl: true,
         hasAnonKey,
+        missingVars,
         url: null,
         host: null,
         errorMessage:
-          'VITE_SUPABASE_URL must be a valid https://...supabase.co project URL (without extra quotes or spaces).',
+          'VITE_SUPABASE_URL is invalid. Expected a full https://<project-ref>.supabase.co URL.',
       },
       anonKey: null,
     };
@@ -107,9 +111,10 @@ export function resolveSupabaseConfig(rawUrl?: string | null, rawAnonKey?: strin
         issue: 'missing-key',
         hasUrl: true,
         hasAnonKey: false,
+        missingVars,
         url: parsedUrl.origin,
         host: parsedUrl.host,
-        errorMessage: 'VITE_SUPABASE_ANON_KEY is missing in this build.',
+        errorMessage: 'Missing VITE_SUPABASE_ANON_KEY in this build.',
       },
       anonKey: null,
     };
@@ -121,6 +126,7 @@ export function resolveSupabaseConfig(rawUrl?: string | null, rawAnonKey?: strin
       issue: 'ready',
       hasUrl: true,
       hasAnonKey: true,
+      missingVars: [],
       url: parsedUrl.origin,
       host: parsedUrl.host,
     },
@@ -128,21 +134,21 @@ export function resolveSupabaseConfig(rawUrl?: string | null, rawAnonKey?: strin
   };
 }
 
-// Read direct Vite static replacements first, with compile-time define & Node test safety
+// Direct static Vite env property access so Vite statically replaces both values at build time,
+// guarded with typeof import.meta !== 'undefined' && import.meta.env for Node test compatibility.
 const rawBuildUrl =
-  (typeof __VITE_SUPABASE_URL__ !== 'undefined' ? __VITE_SUPABASE_URL__ : undefined) ||
-  (typeof import.meta !== 'undefined' && import.meta.env
+  typeof import.meta !== 'undefined' && import.meta.env
     ? import.meta.env.VITE_SUPABASE_URL
-    : undefined);
+    : undefined;
 
 const rawBuildAnonKey =
-  (typeof __VITE_SUPABASE_ANON_KEY__ !== 'undefined' ? __VITE_SUPABASE_ANON_KEY__ : undefined) ||
-  (typeof import.meta !== 'undefined' && import.meta.env
-    ? import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
-    : undefined);
+  typeof import.meta !== 'undefined' && import.meta.env
+    ? import.meta.env.VITE_SUPABASE_ANON_KEY
+    : undefined;
 
 const resolved = resolveSupabaseConfig(rawBuildUrl, rawBuildAnonKey);
 
+let singletonClient: SupabaseClient | null = null;
 let clientPromise: Promise<SupabaseClient | null> | null = null;
 let lastClientInitError: string | null = null;
 
@@ -163,30 +169,36 @@ export async function getSupabaseClient(): Promise<SupabaseClient | null> {
     return null;
   }
 
+  if (singletonClient) {
+    return singletonClient;
+  }
+
   const targetUrl = resolved.status.url;
   const targetKey = resolved.anonKey;
 
   if (!clientPromise) {
     lastClientInitError = null;
     clientPromise = import('@supabase/supabase-js')
-      .then(({ createClient }) =>
-        createClient(targetUrl, targetKey, {
+      .then(({ createClient }) => {
+        const client = createClient(targetUrl, targetKey, {
           auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false,
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: true,
           },
           realtime: {
             params: {
               eventsPerSecond: 10,
             },
           },
-        })
-      )
+        });
+        singletonClient = client;
+        return client;
+      })
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
         lastClientInitError = message;
-        console.warn('Supabase initialization failed, falling back to localStorage:', message);
+        console.warn('Supabase initialization failed:', message);
         clientPromise = null;
         return null;
       });

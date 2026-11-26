@@ -3,7 +3,7 @@ import { m } from 'motion/react';
 import { Clock, MapPin, Phone, Check, Wifi, ShieldCheck } from 'lucide-react';
 import { BrandEmblem } from './BrandEmblem.tsx';
 import { CafeInfo, StorefrontTheme } from '../types/index.ts';
-import { DEFAULT_CAFE_INFO } from '../lib/menuDefaults.ts';
+import { DEFAULT_CAFE_INFO } from '../data/menuData.ts';
 
 interface ProfileViewProps {
   pureVegFilter: boolean;

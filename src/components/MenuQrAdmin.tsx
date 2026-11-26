@@ -12,7 +12,8 @@ import {
   Wifi,
 } from 'lucide-react';
 import { CafeInfo } from '../types/index.ts';
-import { DEFAULT_CAFE_INFO } from '../lib/menuDefaults.ts';
+import { DEFAULT_CAFE_INFO } from '../data/menuData.ts';
+import { isSupabaseConfigured } from '../lib/supabaseClient.ts';
 import { BrandEmblem } from './BrandEmblem.tsx';
 import {
   getCustomerStorefrontUrl,
@@ -484,7 +485,7 @@ export const MenuQrAdmin: React.FC<MenuQrAdminProps> = ({
                 </label>
               </div>
 
-              {syncStatus === 'local' && (
+              {syncStatus === 'local' && !isSupabaseConfigured() && (
                 <div className="pt-2 border-t border-[#F0E6D8] text-[11px] text-[#7A6452] leading-relaxed">
                   <strong>Multi-Device Tip:</strong> Browser-tab sync is ready locally. To push Admin edits live to external customer phones over the internet, configure{' '}
                   <code className="px-1 py-0.5 rounded bg-[#FAF6EE] text-[#2C1C12] font-mono">
